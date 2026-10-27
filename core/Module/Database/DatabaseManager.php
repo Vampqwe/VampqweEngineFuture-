@@ -99,7 +99,9 @@ final class DatabaseManager implements DatabaseInterface
      */
     public function migrate(string $sql): int
     {
-        return count((new SqlFileRunner())->run($this->pdo(), $sql));
+        // Дампы из phpMyAdmin содержат MySQL-директивы (SET SQL_MODE и т.п.) —
+        // исполнитель пропускает их для не-mysql драйверов (переносимость схемы).
+        return count((new SqlFileRunner())->run($this->pdo(), $sql, $this->driver()));
     }
 
     /** Существует ли таблица в активной БД (information_schema/sqlite_master). */
