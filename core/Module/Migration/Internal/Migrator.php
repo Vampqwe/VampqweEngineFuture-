@@ -278,17 +278,73 @@ PHP;
     private function resolve(string $id, string $file): MigrationInterface
     {
         $factory = require $file;
+
+        // Допускаются два стиля файла миграций:
+        //  1) return new SomeMigration($db);   — готовый экземпляр (обратная совместимость);
+        //  2) return static fn(DatabaseInterface $db): MigrationInterface => new ...; — фабрика.
+        if ($factory instanceof \Closure) {
+            $factory = $factory($this->db);
+        }
+
         if (!$factory instanceof MigrationInterface) {
             throw new RuntimeException(
                 "Модуль [Migration]: файл [{$id}] должен возвращать реализацию MigrationInterface"
-                . ' (наследник AbstractMigration).'
+                . ' (наследник AbstractMigration) или фабрику static fn(DatabaseInterface $db) => ...'
             );
         }
-        if ($factory->id() !== $id) {
+
+        // Если у миграции пустой id — подставляем имя файла (источник истины — файловая система).
+        if ($factory->id() === '') {
+            $factory = $this->withId($file, $id);
+        } elseif ($factory->id() !== $id) {
             throw new RuntimeException("Модуль [Migration]: id миграции [{$factory->id()}] не совпадает с именем файла [{$id}].");
         }
 
         return $factory;
+    }
+
+    /**
+     * Пересоздаёт экземпляр миграции с корректным id из имени файла.
+     * Работает для классов-наследников AbstractMigration (конструктор: db, id).
+     */
+    private function withId(string $file, string $id): MigrationInterface
+    {
+        $reflection = new \ReflectionClass($this->classFromFile($file));
+        $migration = $reflection->newInstance($this->db, $id);
+        if (!$migration instanceof MigrationInterface) {
+            throw new RuntimeException("Модуль [Migration]: класс файла [{$id}] не является MigrationInterface.");
+        }
+
+        return $migration;
+    }
+
+    /**
+     * Определяет FQCN единственного класса в файле миграции
+     * (файлы migrations/ не автозагружаются PSR-4, поэтому парсим заголовок).
+     */
+    private function classFromFile(string $file): string
+    {
+        $src = (string) file_get_contents($file);
+        $namespace = '';
+        if (preg_match('/^\s*namespace\s+([^;{\s]+)/m', $src, $m)) {
+            $namespace = $m[1];
+        }
+        if (!preg_match('/^\s*(?:final\s+|abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)/m', $src, $m)) {
+            throw new RuntimeException("Модуль [Migration]: в файле [{$file}] не найден класс миграции.");
+        }
+        $fqcn = $namespace !== '' ? $namespace . '\\' . $m[1] : $m[1];
+
+        if (!class_exists($fqcn)) {
+            // Класс уже был объявлен предыдущим require этого же файла — OK; иначе ошибка.
+            foreach (get_declared_classes() as $c) {
+                if (strcasecmp(substr($c, (int) strrpos($c, '\\') + 1), $m[1]) === 0) {
+                    return $c;
+                }
+            }
+            throw new RuntimeException("Модуль [Migration]: класс [{$fqcn}] недоступен.");
+        }
+
+        return $fqcn;
     }
 
     private function describe(MigrationInterface $m): string
