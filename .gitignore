@@ -1,3 +1,8 @@
 logs/
 *.log
 .installed
+
+# локальные секреты и рабочие БД не коммитим
+.env
+storage/*.sqlite
+database/*.sqlite
