@@ -109,6 +109,15 @@ final class DatabaseManager implements DatabaseInterface
             throw new RuntimeException("Модуль [Database]: недопустимое имя таблицы '{$table}'.");
         }
 
+        // Для sqlite: если файл БД пуст (0 байт) — таблиц заведомо нет.
+        // Иначе PDO создаёт in-memory соединение и даёт ложные результаты.
+        if ($this->driver() === 'sqlite') {
+            $file = $this->sqliteFile();
+            if ($file !== null && is_file($file) && filesize($file) === 0) {
+                return false;
+            }
+        }
+
         return match ($this->driver()) {
             'mysql'  => (bool) $this->selectOne(
                 'SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
@@ -135,6 +144,22 @@ final class DatabaseManager implements DatabaseInterface
     }
 
     // ==================== Internal ====================
+
+    /** Абсолютный путь sqlite-файла из конфига (резолв через storage_path — п.7). */
+    private function sqliteFile(): ?string
+    {
+        $path = (string) $this->config->get('database.connections.sqlite.database', '');
+
+        if ($path === '') {
+            return null;
+        }
+
+        if (!str_starts_with($path, '/') && $this->container->has('storage_path')) {
+            $path = rtrim((string) $this->container->get('storage_path'), '/') . '/' . $path;
+        }
+
+        return $path;
+    }
 
     private function pdo(): PDO
     {
