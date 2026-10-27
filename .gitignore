@@ -1,2 +1,5 @@
 .env
 logs/
+*.log
+storage/database.sqlite
+storage/.installed

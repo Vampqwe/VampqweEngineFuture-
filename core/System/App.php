@@ -47,6 +47,15 @@ class App
 
         // Загружаем .env ДО чтения конфигов (config/app.php читает $_ENV)
         EnvLoader::load($paths->get('base') . '/.env');
+
+        // putenv() из загрузчика не обновляет суперглобальный $_ENV — синхронизируем,
+        // иначе конфиги, прочитанные позже, увидят только переменные реального окружения.
+        foreach ($_SERVER as $key => $value) {
+            if (is_string($key) && getenv($key) !== false && !isset($_ENV[$key])) {
+                $_ENV[$key] = (string) $value;
+            }
+        }
+        unset($key, $value);
     }
 
     /**
