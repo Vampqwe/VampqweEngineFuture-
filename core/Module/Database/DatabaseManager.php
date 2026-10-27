@@ -115,15 +115,20 @@ final class DatabaseManager implements DatabaseInterface
         // Он устарел: SQLite при первом же запросе сам инициализирует пустой
         // файл, а резолв пути ниже теперь симметричен PdoConnector (единый
         // storage_path), поэтому честная проверка через sqlite_master надёжна.
-        return match ($this->driver()) {
-            'mysql'  => (bool) $this->selectOne(
+        // ВАЖНО: приведение идёт к полю 'c' (счётчик), а НЕ к массиву строки:
+        // (bool)['c'=>0] === true — именно эта ошибка давала ложное «таблица
+        // существует» в пустой базе и ломала реестр миграций.
+        $row = match ($this->driver()) {
+            'mysql'  => $this->selectOne(
                 'SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
                 [$table],
             ),
-            'pgsql'  => (bool) $this->selectOne('SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_name = ?', [$table]),
-            'sqlite' => (bool) $this->selectOne('SELECT COUNT(*) AS c FROM sqlite_master WHERE type = ? AND name = ?', ['table', $table]),
-            default  => false,
+            'pgsql'  => $this->selectOne('SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_name = ?', [$table]),
+            'sqlite' => $this->selectOne('SELECT COUNT(*) AS c FROM sqlite_master WHERE type = ? AND name = ?', ['table', $table]),
+            default  => null,
         };
+
+        return (int) ($row['c'] ?? 0) > 0;
     }
 
     public function driver(): string
