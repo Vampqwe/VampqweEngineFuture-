@@ -6,8 +6,11 @@ namespace App\Core\System\Support;
 /**
  * Минимальный загрузчик .env-файлов.
  *
- * Значения попадают в getenv()/$_ENV/$_SERVER, но НЕ перезаписывают
- * уже установленные переменные окружения (важно для Docker/CI).
+ * .env — единственная точка правды конфигурации окружения приложения:
+ * значения из файла ПРИНУДИТЕЛЬНО замещают $_ENV/$_SERVER/getenv(),
+ * иначе системные переменные хоста (например, случайное DB_DRIVER=...
+ * в shell) ломают установку и выбор драйвера БД.
+ * Для внешнего переопределения (Docker/CI) используйте ENV_OVERRIDE=1.
  */
 class EnvLoader
 {
@@ -42,7 +45,18 @@ class EnvLoader
                 $value = substr($value, 1, -1);
             }
 
-            if ($name === '' || getenv($name) !== false) {
+            if ($name === '') {
+                continue;
+            }
+
+            // По умолчанию .env выигрывает у переменных окружения хоста.
+            // ENV_OVERRIDE=1 (в самом .env или в shell) включает старое поведение
+            // «не перезаписывать уже установленные» — для Docker/CI.
+            $override = filter_var(
+                getenv('ENV_OVERRIDE') ?: ($_ENV['ENV_OVERRIDE'] ?? ''),
+                FILTER_VALIDATE_BOOLEAN
+            );
+            if ($override && getenv($name) !== false && $name !== 'ENV_OVERRIDE') {
                 continue;
             }
 

@@ -38,8 +38,13 @@ final class PdoConnector
         ];
 
         if ($driver === 'mysql') {
-            $options[PDO::MYSQL_ATTR_INIT_COMMAND] = 'SET NAMES '
-                . (string) ($config['charset'] ?? 'utf8mb4');
+            // PDO::MYSQL_ATTR_INIT_COMMAND существует только если расширение
+            // pdo_mysql скомпилировано — иначе это фатальная ошибка (не найден
+            // константа). Защита: добавляем опцию только при наличии расширения.
+            if (defined('PDO::MYSQL_ATTR_INIT_COMMAND')) {
+                $options[PDO::MYSQL_ATTR_INIT_COMMAND] = 'SET NAMES '
+                    . (string) ($config['charset'] ?? 'utf8mb4');
+            }
         }
 
         if (isset($config['timeout']) && $driver !== 'sqlite') {

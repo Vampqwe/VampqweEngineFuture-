@@ -34,3 +34,42 @@
 [2026-10-27 11:50:58] INFO: Установка завершена успешно
 [2026-10-27 11:51:05] WARNING: Database-шаг установки не выполнен: could not find driver
 [2026-10-27 11:51:05] INFO: Установка завершена успешно
+[2026-10-27 11:59:00] ERROR: Установка прервана: Пароль супер-администратора слишком короткий (мин. 8 символов). {"file":"/workspace/core/Module/Installer/Installer.php","line":91}
+[2026-10-27 11:59:14] ERROR: Schema-шаг установки не выполнен: Модуль [Database]: ошибка выполнения оператора из SQL-дампа: SQLSTATE[HY000]: General error: 1 near "SET": syntax error
+Оператор: SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO"
+[2026-10-27 11:59:14] INFO: Установка завершена успешно
+[2026-10-27 11:59:15] ERROR: Schema-шаг установки не выполнен: Модуль [Database]: ошибка выполнения оператора из SQL-дампа: SQLSTATE[HY000]: General error: 1 near "SET": syntax error
+Оператор: SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO"
+[2026-10-27 11:59:15] INFO: Установка завершена успешно
+[2026-10-27 11:59:45] ERROR: Schema-шаг установки не выполнен: Модуль [Database]: ошибка выполнения оператора из SQL-дампа: SQLSTATE[HY000]: General error: 1 near "CHARACTER": syntax error
+Оператор: CREATE TABLE `authors` (
+  `id` int UNSIGNED NOT NULL,
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Имя автора',
+  `slug` varchar(255) CHARACTER SET utf8mb4
+[2026-10-27 11:59:45] INFO: Установка завершена успешно
+[2026-10-27 11:59:50] ERROR: Schema-шаг установки не выполнен: Модуль [Database]: ошибка выполнения оператора из SQL-дампа: SQLSTATE[HY000]: General error: 1 near "CHARACTER": syntax error
+Оператор: CREATE TABLE `authors` (
+  `id` int UNSIGNED NOT NULL,
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Имя автора',
+  `slug` varchar(255) CHARACTER SET utf8mb4
+[2026-10-27 11:59:50] INFO: Установка завершена успешно
+[2026-10-27 12:00:10] ERROR: Schema-шаг установки не выполнен: Модуль [Database]: ошибка выполнения оператора из SQL-дампа: SQLSTATE[HY000]: General error: 1 near "DEFAULT": syntax error
+Оператор: CREATE TABLE authors (
+  id int NOT NULL,
+  name varchar(255) NOT NULL,
+  slug varchar(255) NOT NULL,
+  bio text,
+  photo varchar(500) DEFAULT NULL,
+  email varchar(255) DEFAULT NULL,
+  schema_person 
+[2026-10-27 12:00:10] INFO: Установка завершена успешно
+[2026-10-27 12:00:20] ERROR: Schema-шаг установки не выполнен: Модуль [Database]: ошибка выполнения оператора из SQL-дампа: SQLSTATE[HY000]: General error: 1 near "DEFAULT": syntax error
+Оператор: CREATE TABLE authors (
+  id int NOT NULL,
+  name varchar(255) NOT NULL,
+  slug varchar(255) NOT NULL,
+  bio text,
+  photo varchar(500) DEFAULT NULL,
+  email varchar(255) DEFAULT NULL,
+  schema_person 
+[2026-10-27 12:00:20] INFO: Установка завершена успешно
