@@ -44,7 +44,11 @@ return [
             'enabled'  => $truthy($_ENV['DB_SQLITE_ENABLED'] ?? null, false), // ← выкл
             'driver'   => 'sqlite',
             // Путь к файлу БД; относительный резолвится от storage_path в коннекторе.
-            'database' => (string) ($_ENV['DB_DATABASE_PATH'] ?? 'database.sqlite'),
+            // ВАЖНО: '' или пробелы = «не задано» — иначе PDO получает пустой путь
+            // и падает с "unable to open database file" вместо дефолта.
+            'database' => trim((string) ($_ENV['DB_DATABASE_PATH'] ?? '')) !== ''
+                ? trim((string) $_ENV['DB_DATABASE_PATH'])
+                : 'database.sqlite',
         ],
     ],
 
