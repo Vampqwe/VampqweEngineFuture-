@@ -37,6 +37,7 @@ final class Doctor implements DoctorInterface
             'ArrayHelper' => \App\Core\Module\ArrayHelper\Contracts\ArrayHelperInterface::class,
             'Session'     => \App\Core\Module\Session\Contracts\SessionInterface::class,
             'Hook'        => \App\Core\Module\Hook\Contracts\HookInterface::class,
+            'Migration'   => \App\Core\Module\Migration\Contracts\MigratorInterface::class,
         ],
     ) {
     }
@@ -167,6 +168,13 @@ final class Doctor implements DoctorInterface
                     }
                     // Движок жив, но СУБД недоступна — это предупреждение, не «OK».
                     return [false, "драйвер '{$driver}': соединение недоступно (проверьте .env / запуск СУБД)"];
+                case 'Migration':
+                    /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $instance */
+                    $st = $instance->status();
+                    if ($st['pending'] > 0) {
+                        return [true, "ждут применения миграции: {$st['pending']} из {$st['total']}"];
+                    }
+                    return [true, "схема в актуальном состоянии ({$st['applied']} миграций)"];
                 case 'Cache':
                     return [true, 'заглушка (реализация в плане; remember деградирует безопасно)'];
                 case 'Queue':

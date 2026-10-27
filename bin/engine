@@ -26,14 +26,16 @@ use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 
 $command = $argv[1] ?? 'doctor';
 
-if ($command !== 'doctor') {
-    echo "Неизвестная команда: {$command}\nДоступные: doctor\n";
+if (!in_array($command, ['doctor', 'migrate', 'migration:rollback', 'migration:make'], true)) {
+    echo "Неизвестная команда: {$command}\n"
+        . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>\n";
     exit(1);
 }
 
 echo "🩺 VampqweEngineFuture — самодиагностика\n";
 echo str_repeat('-', 50) . "\n";
 
+// Общие для всех команд: инициализация контейнера ядра.
 $ok = true;
 
 function check(string $label, bool $pass, string $detail = ''): void
@@ -63,6 +65,42 @@ try {
     $prop = $ref->getProperty('container');
     $prop->setAccessible(true);
     $c = $prop->getValue($app);
+
+    // --- Команды модуля Migration (версионирование схемы БД) ---
+    if ($command !== 'doctor') {
+        /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $migrator */
+        $migrator = $c->get(\App\Core\Module\Migration\Contracts\MigratorInterface::class);
+        $arg = $argv[2] ?? null;
+
+        switch ($command) {
+            case 'migrate':
+                $done = $migrator->migrate($arg);
+                if ($done === []) {
+                    echo "✅ Миграций для применения нет. Статус: "
+                        . json_encode($migrator->status(), JSON_UNESCAPED_UNICODE) . "\n";
+                } else {
+                    foreach ($done as $id) {
+                        echo "✅ Применена миграция: {$id}\n";
+                    }
+                }
+                exit(0);
+
+            case 'migration:rollback':
+                $rolled = $migrator->rollback($arg);
+                echo $rolled === null
+                    ? "➖ Откатывать нечего (реестр пуст).\n"
+                    : "↩️  Откачена миграция: {$rolled}\n";
+                exit(0);
+
+            case 'migration:make':
+                if (!is_string($arg) || $arg === '') {
+                    echo "Использование: php bin/engine migration:make <имя_миграции>\n";
+                    exit(1);
+                }
+                echo "📝 Создана заготовка: " . $migrator->make($arg) . "\n";
+                exit(0);
+        }
+    }
 
     check('Config загружен', $c->get(ConfigRepositoryInterface::class)->has('app.name'));
     check('FileSystem сервис', $c->has(FileSystemInterface::class));

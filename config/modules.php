@@ -83,6 +83,11 @@ return [
         'provider' => \App\Core\Module\Database\Providers\DatabaseServiceProvider::class,
         'critical' => false,
     ],
+    // Версионирование схемы БД. Уровень 5: после Database/TimeDate/Hook/Logger.
+    'Migration' => [
+        'provider' => \App\Core\Module\Migration\Providers\MigrationServiceProvider::class,
+        'critical' => false,
+    ],
     'Security' => [
         'provider' => \App\Core\Module\Security\Providers\SecurityServiceProvider::class,
         'critical' => false,
