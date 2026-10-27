@@ -19,14 +19,21 @@ class DatabaseServiceProvider implements ModuleProviderInterface
 {
     public function register(ContainerInterface $container): void
     {
-        $container->bind(DatabaseInterface::class, static function (ContainerInterface $c): DatabaseManager {
+        $factory = static function (ContainerInterface $c): DatabaseManager {
             // Ленивое создание: PDO-соединение открывается только при первом запросе,
             // поэтому движок стартует даже без доступной СУБД.
             return new DatabaseManager(
                 $c->get(ContainerInterface::class),
                 $c->get(ConfigRepositoryInterface::class),
             );
-        });
+        };
+
+        // Синглтон по обоим ключам: один и тот же объект с тем же PDO.
+        // Без этого Migrator (резолвил по контракту) и bin/engine (по классу)
+        // получали РАЗНЫЕ экземпляры → разные sqlite-соединения → гонка
+        // «таблица создана в одном коннекте, tableExists не видит её в другом».
+        $container->bind(DatabaseInterface::class, $factory);
+        $container->bind(DatabaseManager::class, static fn (ContainerInterface $c) => $c->get(DatabaseInterface::class));
     }
 
     public function boot(): void
