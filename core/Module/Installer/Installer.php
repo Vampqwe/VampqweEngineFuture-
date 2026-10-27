@@ -3,38 +3,234 @@ declare(strict_types=1);
 
 namespace App\Core\Module\Installer;
 
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
-use RuntimeException;
+use App\Core\Module\Installer\Contracts\InstallerPageInterface;
+use App\Core\Module\Installer\Internal\InstallerView;
+use App\Core\Module\Installer\Internal\Steps\CreateEnvStep;
+use App\Core\Module\Logger\Contracts\LoggerInterface;
+use App\Core\Module\Security\Contracts\SecurityInterface;
+use Throwable;
 
 /**
- * Фасад модуля Installer.
+ * Фасад модуля Installer — первичная установка движка.
  *
- * Зависимости: FileSystem (флаги/файлы), Database (миграции), Security (генерация app.key),
- *              Config, Doctor (проверка требований перед установкой).
- * РЕАЛИЗАЦИЯ В ПЛАНЕ.
+ * Зависимости (только через контракты, п.3):
+ *   FileSystemInterface — флаги/файлы; SecurityInterface — app.key;
+ *   ConfigRepositoryInterface — настройки; LoggerInterface — канал 'Installer' (свой лог-файл).
+ *
+ * Поток: GET /install -> требования -> POST /install/settings (форма) ->
+ *        POST /install/run -> install() -> success.
+ * Database-шаг намеренно отсутствует: модуль Database ещё не реализован,
+ * установка не может падать из-за нереализованных соседей (п.9).
  */
-final class Installer implements InstallerInterface
+final class Installer implements InstallerInterface, InstallerPageInterface
 {
-    public function __construct(private readonly string $storagePath = '')
-    {
+    private const FLAG_INSTALLED  = '.installed';
+    private const FLAG_INSTALLING = '.installing';
+
+    public function __construct(
+        private readonly string $basePath,
+        private readonly string $storagePath,
+        private readonly FileSystemInterface $fs,
+        private readonly SecurityInterface $security,
+        private readonly ConfigRepositoryInterface $config,
+        private readonly LoggerInterface $logger,
+    ) {
     }
 
+    // ==================== InstallerInterface ====================
+
+    /** @return array<string,bool> label => ok */
     public function requirements(): array
     {
         return [
-            'php_version' => PHP_VERSION,
-            'php_ok'      => PHP_VERSION_ID >= 80100,
-            'extensions'  => ['pdo', 'mbstring', 'json'],
+            'PHP >= 8.1'          => PHP_VERSION_ID >= 80100,
+            'Расширение json'     => extension_loaded('json'),
+            'Расширение mbstring' => extension_loaded('mbstring'),
+            'storage записываем'  => is_writable($this->storagePath),
+            'logs записываем'     => $this->ensureWritableDir($this->logDirFromPaths()),
         ];
     }
 
     public function install(array $options = []): bool
     {
-        throw new RuntimeException('Модуль [Installer] объявлен в ядре, но ещё не реализован.');
+        $flagFile = $this->storagePath . '/' . self::FLAG_INSTALLING;
+        $this->fs->createFile($flagFile);
+
+        try {
+            // app.key генерируется один раз; существующий .env не перетираем
+            $key = $this->currentAppKey() ?? 'base64:' . $this->security->randomToken(32);
+            (new CreateEnvStep($this->fs))->handle($this->basePath . '/.env', [
+                'APP_NAME'     => $this->sanitizeName((string) ($options['app_name'] ?? 'VampqweEngineFuture')),
+                'APP_ENV'      => (bool) ($options['debug'] ?? false) ? 'local' : 'production',
+                'APP_DEBUG'    => (bool) ($options['debug'] ?? false) ? 'true' : 'false',
+                'APP_KEY'      => $key,
+                'APP_TIMEZONE' => $this->sanitizeTimezone((string) ($options['timezone'] ?? 'UTC')),
+                'LOG_LEVEL'    => 'debug',
+            ]);
+
+            // Флаг готовности — AppState::Running определяется по нему
+            $this->fs->createFile($this->storagePath . '/' . self::FLAG_INSTALLED);
+
+            $this->logger->info('Установка завершена успешно', ['channel' => 'Installer']);
+
+            return true;
+        } catch (Throwable $e) {
+            $this->logger->error('Установка прервана: ' . $e->getMessage(), [
+                'channel' => 'Installer',
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+            ]);
+
+            return false;
+        } finally {
+            $this->fs->delete($flagFile);
+        }
     }
 
     public function isInstalling(): bool
     {
-        return $this->storagePath !== '' && is_file($this->storagePath . '/.installing');
+        return $this->fs->isFile($this->storagePath . '/' . self::FLAG_INSTALLING);
+    }
+
+    public function isInstalled(): bool
+    {
+        return $this->fs->isFile($this->storagePath . '/' . self::FLAG_INSTALLED);
+    }
+
+    // ==================== InstallerPageInterface ====================
+
+    public function requirementsPage(array $checks): string
+    {
+        $rows = '';
+        foreach ($checks as $label => $ok) {
+            $cls  = $ok ? 'ok' : 'fail';
+            $icon = $ok ? '&#10004;' : '&#10008;';
+            $rows .= '<tr><td>' . InstallerView::esc((string) $label) . '</td>'
+                   . '<td class="' . $cls . '">' . $icon . ' ' . ($ok ? 'OK' : 'НЕ ОБНАРУЖЕНО') . '</td></tr>';
+        }
+
+        $allOk = !in_array(false, $checks, true);
+        $cta   = $allOk
+            ? '<form method="post" action="/install/settings"><button>Перейти к настройкам &rarr;</button></form>'
+            : '<div class="errbox">Устраните проблемы выше и обновите страницу.</div>';
+
+        $body = '<div class="sub">Проверка окружения перед установкой движка.</div>'
+              . '<h2>Требования</h2><table>' . $rows . '</table>' . $cta;
+
+        return InstallerView::page('Установка VampqweEngineFuture', $body, ['step' => 1]);
+    }
+
+    public function settingsForm(array $errors = []): string
+    {
+        $errBox = '';
+        if ($errors !== []) {
+            $errBox = '<div class="errbox">' . implode('<br>', array_map([InstallerView::class, 'esc'], $errors)) . '</div>';
+        }
+
+        $tzOptions = '';
+        foreach (\DateTimeZone::listIdentifiers() as $id) {
+            $sel = $id === 'Europe/Moscow' ? ' selected' : '';
+            $tzOptions .= '<option value="' . InstallerView::esc($id) . '"' . $sel . '>' . InstallerView::esc($id) . '</option>';
+        }
+
+        $name = InstallerView::esc((string) $this->config->get('app.name', 'VampqweEngineFuture'));
+
+        $body = $errBox
+              . '<div class="sub">Шаг 2 из 3. Настройки можно поменять позже в <code>.env</code>.</div>'
+              . '<form method="post" action="/install/run">'
+              . '<label>Название сайта</label>'
+              . '<input name="app_name" value="' . $name . '" maxlength="64" required>'
+              . '<label>Часовой пояс</label>'
+              . '<select name="timezone">' . $tzOptions . '</select>'
+              . '<label style="display:flex;gap:8px;align-items:center;margin-top:14px">'
+              . '<input type="checkbox" name="debug" value="1" style="width:auto"> Режим отладки (показывать трейсы ошибок)</label>'
+              . '<button>Установить</button></form>';
+
+        return InstallerView::page('Настройка движка', $body, ['step' => 2]);
+    }
+
+    public function successPage(array $summary): string
+    {
+        $rows = '';
+        foreach ($summary as $k => $v) {
+            $rows .= '<tr><td>' . InstallerView::esc((string) $k) . '</td><td><code>'
+                  . InstallerView::esc(is_bool($v) ? ($v ? 'да' : 'нет') : (string) $v) . '</code></td></tr>';
+        }
+
+        $body = '<div class="success">Движок установлен и готов к работе!</div>'
+              . '<table>' . $rows . '</table>'
+              . '<a href="/" style="color:#a9c7ff">&rarr; Открыть сайт</a>';
+
+        return InstallerView::page('Установка завершена', $body, ['step' => 3]);
+    }
+
+    public function failurePage(string $reason): string
+    {
+        $body = '<div class="errbox">&#10060; ' . InstallerView::esc($reason) . '</div>'
+              . '<form method="get" action="/install"><button>Попробовать снова</button></form>';
+
+        return InstallerView::page('Ошибка установки', $body, ['step' => 2]);
+    }
+
+    // ==================== Internal helpers ====================
+
+    private function currentAppKey(): ?string
+    {
+        $envFile = $this->basePath . '/.env';
+        if (!$this->fs->isFile($envFile)) {
+            return isset($_ENV['APP_KEY']) ? (string) $_ENV['APP_KEY'] : null;
+        }
+        foreach (explode("\n", $this->fs->read($envFile)) as $line) {
+            $line = trim($line);
+            if (str_starts_with($line, 'APP_KEY=')) {
+                return substr($line, 8);
+            }
+        }
+        return null;
+    }
+
+    /** Валидация POST-настроек; пустой массив — всё корректно. */
+    public static function validateSettings(array $post): array
+    {
+        $errors = [];
+
+        $name = trim((string) ($post['app_name'] ?? ''));
+        if ($name === '' || mb_strlen($name) > 64) {
+            $errors[] = 'Название сайта: от 1 до 64 символов.';
+        }
+        if (!in_array((string) ($post['timezone'] ?? ''), \DateTimeZone::listIdentifiers(), true)) {
+            $errors[] = 'Недопустимый часовой пояс.';
+        }
+
+        return $errors;
+    }
+
+    private function sanitizeName(string $name): string
+    {
+        $clean = preg_replace('/[^A-Za-zА-Яа-яЁё0-9 _\-]/u', '', $name);
+        return ($clean === null || $clean === '') ? 'VampqweEngineFuture' : $clean;
+    }
+
+    private function sanitizeTimezone(string $tz): string
+    {
+        return in_array($tz, \DateTimeZone::listIdentifiers(), true) ? $tz : 'UTC';
+    }
+
+    /** Каталог логов берём из config (app.logs_path регистрируется Paths) — без хардкода. */
+    private function logDirFromPaths(): string
+    {
+        $p = $this->config->get('paths.logs');
+        return is_string($p) && $p !== '' ? $p : $this->basePath . DIRECTORY_SEPARATOR . 'logs';
+    }
+
+    private function ensureWritableDir(string $dir): bool
+    {
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            return false;
+        }
+        return is_writable($dir);
     }
 }
