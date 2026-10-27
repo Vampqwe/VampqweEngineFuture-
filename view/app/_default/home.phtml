@@ -1,12 +1,12 @@
 @extends('layouts/site')
-@section('title') {{ appName }} @endsection
+@section('title') {{ $appName }} @endsection
 @section('content')
     @if($dbOk)
-        <h1>✅ {{ appName }}</h1>
-        <p>Движок успешно запущен! (Debug: {{ debugLabel }})</p>
+        <h1>✅ {{ $appName }}</h1>
+        <p>Движок успешно запущен! (Debug: {{ $debugLabel }})</p>
     @else
-        <h1>⚠️ {{ appName }}</h1>
-        <p>Ядро работает, но база данных «{{ dbDriver }}» недоступна. Проверьте запуск СУБД и настройки в .env.</p>
+        <h1>⚠️ {{ $appName }}</h1>
+        <p>Ядро работает, но база данных «{{ $dbDriver }}» недоступна. Проверьте запуск СУБД и настройки в .env.</p>
         @if($debug && $dbError !== null)
             <pre>{{ $dbError }}</pre>
         @endif

@@ -1,2 +1,3 @@
-storage/.installed
+.env
+storage/cache/
 storage/database.sqlite

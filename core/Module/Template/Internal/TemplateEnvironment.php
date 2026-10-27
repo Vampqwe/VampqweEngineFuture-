@@ -73,37 +73,36 @@ final class TemplateEnvironment
     {
         $scope = array_merge($this->shared, $data);
 
-        // eval() исполняет код в PHP-режиме: открывающий тег внутри строки
-        // является синтаксической ошибкой. Компилятор выдаёт шаблон как смесь
-        // inline-HTML и php-фрагментов, поэтому куски HTML между закрывающим
-        // и открывающим тегами превращаются в echo; одиночные теги в начале
-        // и конце строки снимаются.
-        $code = preg_replace_callback(
-            '/\?>\s*(.*?)\s*<\?php/s',
-            static function (array $m): string {
-                if ($m[1] === '') {
-                    return '';
-                }
-                $html = str_replace(['\\', "'"], ['\\\\', "\\'"], $m[1]);
-                return "echo '" . $html . "';";
-            },
-            $compiledPhp
-        ) ?? $compiledPhp;
+        // Скомпилированный шаблон — это полноценный PHP-файл (смесь inline-HTML
+        // и <?php ... ?>). Исполняем его через include временного файла:
+        // в отличие от eval() здесь корректно обрабатываются переходы
+        // HTML->PHP режимы (в т.ч. шаблоны, начинающиеся с чистого HTML),
+        // стектрейсы ошибок указывают на реальный файл, а не «eval()'d code».
+        $tmp = tempnam(sys_get_temp_dir(), 'vampview') . '.php';
+        file_put_contents($tmp, $compiledPhp);
 
-        $code = preg_replace('/^\s*<\?php\s*/', '', $code) ?? $code;
-        $code = preg_replace('/\s*\?>\s*$/', '', $code) ?? $code;
+        // include внутри метода: шаблон получает $scope и имеет доступ к $this
+        // (методы e(), yieldSection(), renderPartial() вызываются как $this->...).
+        try {
+            $output = $this->renderFile($tmp, $scope);
+        } finally {
+            @unlink($tmp);
+        }
 
+        return $output;
+    }
+
+    private function renderFile(string $__file__, array $scope): string
+    {
+        extract($scope, EXTR_SKIP);
         ob_start();
         try {
-            (function () use ($code, $scope): void {
-                extract($scope, EXTR_SKIP);
-                eval($code);
-            })();
+            /** @psalm-suppress UnresolvableInclude — скомпилированный шаблон */
+            include $__file__;
         } catch (\Throwable $e) {
             ob_end_clean();
             throw $e;
         }
-
         return (string) ob_get_clean();
     }
 
