@@ -64,6 +64,17 @@ try {
 
     $installed = file_exists(BASE_PATH . '/storage/.installed');
     check('Состояние', true, $installed ? 'Running (установлен)' : 'NotInstalled');
+
+    // Полная самодиагностика через модуль Doctor (п.9 Конституции):
+    // наличие всех контрактов ядра и сервисных модулей.
+    $doctorClass = \App\Core\Module\Doctor\Contracts\DoctorInterface::class;
+    if ($c->has($doctorClass)) {
+        /** @var \App\Core\Module\Doctor\Contracts\DoctorInterface $doctor */
+        $doctor = $c->get($doctorClass);
+        foreach ($doctor->check() as $item) {
+            check('Модуль: ' . $item['name'], $item['ok'], $item['message']);
+        }
+    }
 } catch (\Throwable $e) {
     check('Инициализация ядра', false, $e->getMessage());
 }
