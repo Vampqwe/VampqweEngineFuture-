@@ -70,7 +70,7 @@ class Kernel
                 $state
             )],
         ));
-        $userRouter->get('/', fn(Request $r): Response => $this->homeResponse());
+        $userRouter->get('/', fn(Request $r): Response => $this->homeResponse($r));
 
         $handler = $userRouter->match($request->method, $request->path);
 
@@ -275,7 +275,7 @@ class Kernel
         return $request->path === '/system/health';
     }
 
-    private function homeResponse(): Response
+    private function homeResponse(Request $request): Response
     {
         $appName = 'Unknown Engine';
         $debug   = false;
@@ -286,30 +286,74 @@ class Kernel
             $debug   = (bool) $config->get('app.debug', false);
         }
 
-        $debugLabel = $debug ? 'ON' : 'OFF';
-        $body       = "✅ <b>{$appName}</b> (Debug: {$debugLabel}) успешно запущен!";
-        $status     = 200;
+        $dbOk = true; $dbDriver = ''; $dbError = null;
 
         // Честность фундамента: если активирован драйвер Database, а соединения
-        // нет — главная НЕ должна рапортовать «успешно запущен». Иначе при
-        // отключённой СУБД движок врёт о своём состоянии.
+        // нет — главная НЕ должна рапортовать «успешно запущен».
         if ($this->container->has(\App\Core\Module\Database\Contracts\DatabaseInterface::class)) {
             /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $db */
             $db  = $this->container->get(\App\Core\Module\Database\Contracts\DatabaseInterface::class);
-            $err = $db->connectionError();
+            $dbError = $db->connectionError();
+            if ($dbError !== null) {
+                $dbOk = false;
+                $dbDriver = $db->driver();
+            }
+        }
+        $status = $dbOk ? 200 : 503;
 
-            if ($err !== null) {
-                $driver = htmlspecialchars($db->driver(), ENT_QUOTES);
-                $note   = $debug
-                    ? '<br><span style="color:#b00">' . htmlspecialchars($err, ENT_QUOTES) . '</span>'
-                    : '';
-                $body = "⚠️ <b>{$appName}</b>: ядро работает, но база данных «{$driver}» недоступна."
-                    . ' Проверьте запуск СУБД и настройки в .env.' . $note;
-                $status = 503;
+        // Мультисайт: тема сайта по домену запроса. Пока маппинг простейший
+        // (домен содержит имя темы); полноценный реестр сайтов в БД — следующий шаг.
+        $theme = $this->resolveThemeByHost($request->header('host') ?? '');
+
+        // Рендер через модуль Template (view/app/<theme>/home.phtml).
+        if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
+            /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
+            $views = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+            try {
+                if ($theme !== '') {
+                    $views->setTheme($theme);
+                }
+                $body = $views->render('home', [
+                    'appName'    => $appName,
+                    'debug'      => $debug,
+                    'debugLabel' => $debug ? 'ON' : 'OFF',
+                    'dbOk'       => $dbOk,
+                    'dbDriver'   => $dbDriver,
+                    'dbError'    => $dbError,
+                ]);
+                return new Response($body, $status);
+            } catch (\Throwable $e) {
+                // сломанный шаблон не должен ронять движок — уходим в fallback-текст
+                if ($this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
+                    $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)
+                        ->error('Template: рендер home не удался, сработал fallback', ['exception' => $e, 'channel' => 'Template']);
+                }
             }
         }
 
+        // Fallback без Template (например, шаблоны ещё не созданы).
+        $body = $dbOk
+            ? "✅ <b>" . htmlspecialchars($appName, ENT_QUOTES) . "</b> (Debug: " . ($debug ? 'ON' : 'OFF') . ") успешно запущен!"
+            : "⚠️ <b>" . htmlspecialchars($appName, ENT_QUOTES) . "</b>: база данных «" . htmlspecialchars($dbDriver, ENT_QUOTES) . "» недоступна.";
         return new Response($body, $status);
+    }
+
+    /**
+     * Мультисайт: сопоставляет хост запроса с темой view/app/.
+     * Временная эвристика до появления таблицы sites: поддомен/домен вида
+     * animals.localhost или animals.local -> тема 'animals'.
+     */
+    private function resolveThemeByHost(string $host): string
+    {
+        $host = strtolower(preg_replace('/:\d+$/', '', $host) ?? $host);
+        if ($host === '' || $host === 'localhost' || str_contains($host, '127.0.0.1')) {
+            return '';
+        }
+        $first = explode('.', $host)[0];
+        if (preg_match('#^[a-z0-9_-]+$#', $first) && $first !== 'www') {
+            return $first;
+        }
+        return '';
     }
 
     private function healthResponse(Request $request): Response

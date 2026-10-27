@@ -25,7 +25,8 @@ final class Paths
         'config'      => 'config',
         'storage'     => 'storage',
         'public'      => 'public',
-        'view'        => 'view',
+        'core_view'   => 'view/core',  // шаблоны ядра: ошибки, installer, админка
+        'app_view'    => 'view/app',   // пользовательские темы сайтов (мультисайт): view/app/<theme>/
         'modules_app' => 'app/modules',
         'logs'        => 'logs',           // логи модулей: logs/<дата>/<канал>.log
         'cache'       => 'storage/cache',  // кэш движка
