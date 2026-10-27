@@ -17,4 +17,7 @@ interface InstallerInterface
 
     /** Идёт ли установка сейчас (флаг storage/.installing)? */
     public function isInstalling(): bool;
+
+    /** Установлен ли движок (флаг storage/.installed + валидный .env). */
+    public function isInstalled(): bool;
 }

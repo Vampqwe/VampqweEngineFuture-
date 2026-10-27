@@ -27,6 +27,6 @@ interface SecurityInterface
     /** Зашифровать значение симметричным ключом (app.key). */
     public function encrypt(string $plaintext): string;
 
-    /** Расшифровать значение. */
-    public function decrypt(string $payload): string;
+    /** Расшифровать значение; null — payload повреждён/подделан или ключ не совпал. */
+    public function decrypt(string $payload): ?string;
 }

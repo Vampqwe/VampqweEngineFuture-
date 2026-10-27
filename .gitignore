@@ -1,1 +1,5 @@
 storage/.installed
+
+# Runtime session data (модуль Session)
+/storage/sessions/
+/storage/.session_store.*
