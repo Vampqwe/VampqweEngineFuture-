@@ -1,1 +1,12 @@
 logs/
+
+# локальные артефакты разработки/тестов (не в VCS)
+.env
+storage/database.sqlite
+storage/.installed
+storage/.installing
+storage/.upgrading
+storage/.maintenance
+storage/.error
+storage/.session_store.*
+*.bundle

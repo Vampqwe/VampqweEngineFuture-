@@ -36,6 +36,7 @@ final class Doctor implements DoctorInterface
             'Installer'   => \App\Core\Module\Installer\Contracts\InstallerInterface::class,
             'ArrayHelper' => \App\Core\Module\ArrayHelper\Contracts\ArrayHelperInterface::class,
             'Session'     => \App\Core\Module\Session\Contracts\SessionInterface::class,
+            'Hook'        => \App\Core\Module\Hook\Contracts\HookInterface::class,
         ],
     ) {
     }
@@ -118,6 +119,25 @@ final class Doctor implements DoctorInterface
                 case 'ArrayHelper':
                     $v = $instance->get(['a' => ['b' => 1]], 'a.b');
                     return [$v === 1, 'работает (точечная нотация)'];
+                case 'Hook':
+                    /** @var \App\Core\Module\Hook\Contracts\HookInterface $instance */
+                    $seen = [];
+                    $instance->addAction('doctor.probe', static function (mixed ...$a) use (&$seen): mixed {
+                        $seen[] = 'p20';
+                        return ($a[0] ?? '') . '|second';
+                    }, 20, 'doctor-p20');
+                    $instance->addAction('doctor.probe', static function (mixed ...$a) use (&$seen): mixed {
+                        $seen[] = 'p5';
+                        return ($a[0] ?? '') . '|first';
+                    }, 5, 'doctor-p5');
+                    $filtered = $instance->applyFilters('doctor.probe', 'start');
+                    $count    = $instance->listenerCount('doctor.probe');
+                    $removed  = $instance->removeAction('doctor.probe', 'doctor-p5');
+                    $clean    = $instance->listenerCount('doctor.probe') === 1 && $removed;
+                    $instance->removeAll('doctor.probe');
+                    $ok = $filtered === 'start|first|second' && $count === 2 && $clean
+                        && $seen === ['p5', 'p20'] && !$instance->has('doctor.probe');
+                    return [$ok, $ok ? 'работает (приоритеты + фильтры + снятие)' : 'НЕЗДОРОВ: цепочка нарушена'];
                 case 'Security':
                     $tok  = strlen($instance->randomToken(8)) === 16;
                     $hash = $instance->hashPassword('doctor-probe-123');

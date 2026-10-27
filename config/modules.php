@@ -10,7 +10,7 @@ declare(strict_types=1);
  * ]
  *
  * ПОРЯДОК КРИТИЧЕН (п.6 Конституции): модули идут по уровням зависимостей:
- *   0: FileSystem, Parser, ArrayHelper — фундамент, без зависимостей
+ *   0: FileSystem, Parser, ArrayHelper, Hook — фундамент, без зависимостей
  *   1: Config                        — зависит от FileSystem (парсер PHP-конфигов)
  *   2: Logger, TimeDate              — Logger <- FileSystem+Config; TimeDate <- Config
  *   3: Exception, Error              — обработчик/страницы ошибок <- Logger+Config
@@ -36,6 +36,15 @@ return [
     // Уровень 0 — зависимостей не имеет. Используется Config/Database/Template.
     'ArrayHelper' => [
         'provider' => \App\Core\Module\ArrayHelper\Providers\ArrayHelperServiceProvider::class,
+        'critical' => false,
+    ],
+
+    // Событийно-фильтровая шина движка: addAction/applyFilters/dispatch.
+    // Уровень 0 — зависимостей не имеет (Logger подвязывается лениво, только
+    // при ошибке слушателя). Все будущие точки расширения (Pages, ImportExport,
+    // Auth) подписываются через контракт HookInterface.
+    'Hook' => [
+        'provider' => \App\Core\Module\Hook\Providers\HookServiceProvider::class,
         'critical' => false,
     ],
 

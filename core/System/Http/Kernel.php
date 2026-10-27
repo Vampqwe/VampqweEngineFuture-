@@ -5,6 +5,7 @@ namespace App\Core\System\Http;
 
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Error\Contracts\ErrorPageInterface;
+use App\Core\Module\Hook\Contracts\HookInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
@@ -77,7 +78,28 @@ class Kernel
             return $this->finish($this->errorPage(404), $session);
         }
 
-        return $this->finish($handler($request), $session);
+        // Хук-шина движка (модуль Hook): перед выполнением пользовательского
+        // обработчика прогоняем запрос через фильтр — будущие модули (Auth,
+        // Pages, ImportExport) смогут подменить/обработать запрос без правки ядра.
+        if ($this->container->has(HookInterface::class)) {
+            /** @var HookInterface $hooks */
+            $hooks = $this->container->get(HookInterface::class);
+            $preempted = $hooks->applyFilters('engine.request', null, $request, $this->container);
+            if ($preempted instanceof Response) {
+                return $this->finish($preempted, $session);
+            }
+        }
+
+        $response = $handler($request);
+
+        // Пост-фильтр ответа (расширение без вторжения в ядро).
+        if ($this->container->has(HookInterface::class)) {
+            /** @var HookInterface $hooks */
+            $hooks = $this->container->get(HookInterface::class);
+            $response = $hooks->applyFilters('engine.response', $response, $request);
+        }
+
+        return $this->finish($response, $session);
     }
 
     /**
