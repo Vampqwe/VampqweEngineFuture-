@@ -10,6 +10,7 @@ use App\Core\System\Http\Request;
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Config\Internal\Parsers\PhpArrayParser;
 use App\Core\System\Support\EnvLoader;
+use App\Core\System\Support\Paths;
 use RuntimeException;
 
 class App
@@ -31,13 +32,22 @@ class App
         $this->container->instance(ContainerInterface::class, $this->container);
 
         $this->container->instance('base_path', BASE_PATH);
-        $this->container->instance('config_path', BASE_PATH . '/config');
-        $this->container->instance('storage_path', BASE_PATH . '/storage');
-        $this->container->instance('public_path', BASE_PATH . '/public');
-        $this->container->instance('view_path', BASE_PATH . '/view');
+
+        // Единая точка правды о путях (п.7 Конституции): все пути объявлены
+        // только в Support\Paths::MAP и регистрируются в контейнер оттуда.
+        // Потребители получают их по ключам ('config_path', 'logs_path', ...),
+        // никаких конкатенаций BASE_PATH . '/...' в ядре и модулях быть не должно.
+        $paths = new Paths(BASE_PATH);
+        foreach ($paths->all() as $key => $absolute) {
+            if ($key === 'base') {
+                continue; // base_path уже зарегистрирован выше
+            }
+            $this->container->instance($key . '_path', $absolute);
+        }
+        unset($absolute);
 
         // Загружаем .env ДО чтения конфигов (config/app.php читает $_ENV)
-        EnvLoader::load(BASE_PATH . '/.env');
+        EnvLoader::load($paths->get('base') . '/.env');
     }
 
     /**

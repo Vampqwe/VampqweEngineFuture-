@@ -33,6 +33,13 @@ return [
         'critical' => false,
     ],
 
+    // Модуль работы с массивами: точечная нотация, mergeDeep, выборки.
+    // Уровень 0 — зависимостей не имеет. Используется Config/Database/Template.
+    'ArrayHelper' => [
+        'provider' => \App\Core\Module\ArrayHelper\Providers\ArrayHelperServiceProvider::class,
+        'critical' => false,
+    ],
+
     // --- Уровень 1: конфигурация ---
     'Config' => [
         'provider' => \App\Core\Module\Config\Providers\ConfigServiceProvider::class,
