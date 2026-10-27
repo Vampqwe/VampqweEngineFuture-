@@ -25,6 +25,7 @@ final class ErrorPageRenderer implements ErrorPageInterface
         $title = match ($statusCode) {
             404 => 'Страница не найдена',
             503 => 'Сервис временно недоступен',
+            419 => 'Сессия истекла или токен безопасности недействителен',
             default => 'Внутренняя ошибка сервера',
         };
 

@@ -59,4 +59,13 @@ class Request
     {
         return $this->routeParams[$key] ?? $this->query[$key] ?? $this->post[$key] ?? $default;
     }
+
+    /** HTTP-заголовок по имени (регистронезависимо, X-CSRF-Token => HTTP_X_CSRF_TOKEN). */
+    public function header(string $name, ?string $default = null): ?string
+    {
+        $key = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
+        $value = $this->server[$key] ?? null;
+
+        return is_string($value) ? $value : $default;
+    }
 }
