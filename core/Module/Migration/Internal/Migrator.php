@@ -85,6 +85,12 @@ final class {{CLASS}} implements MigrationInterface
 
 PHP;
 
+    /**
+     * Флаг экземпляра (НЕ static!): статический флаг «залипал» между инстансами
+     * и процессами и давал ложное ощущение созданного реестра миграций.
+     */
+    private bool $registryChecked = false;
+
     public function __construct(
         private readonly DatabaseInterface $db,
         private readonly TimeDateInterface $time,
@@ -280,10 +286,11 @@ PHP;
         $factory = require $file;
 
         // Допускаются два стиля файла миграций:
-        //  1) return new SomeMigration($db);   — готовый экземпляр (обратная совместимость);
-        //  2) return static fn(DatabaseInterface $db): MigrationInterface => new ...; — фабрика.
+        //  1) return new SomeMigration($db, '...'); — готовый экземпляр (обратная совместимость);
+        //  2) return static fn(DatabaseInterface $db, string $id): ... => new ...; — фабрика
+        //     (идиоматичный стиль: движок подставляет БД и id из имени файла).
         if ($factory instanceof \Closure) {
-            $factory = $factory($this->db);
+            $factory = $factory($this->db, $id);
         }
 
         if (!$factory instanceof MigrationInterface) {
@@ -400,20 +407,43 @@ PHP;
 
     private function ensureRegistry(): void
     {
-        static $checked = false;
-        if ($checked || $this->db->tableExists(self::REGISTRY_TABLE)) {
-            $checked = true;
+        // Флаг экземпляра: повторный вызов в рамках одного инстанса не ходит в БД.
+        if ($this->registryChecked) {
+            return;
+        }
+
+        if ($this->db->tableExists(self::REGISTRY_TABLE)) {
+            $this->registryChecked = true;
 
             return;
         }
 
-        $this->db->run(
-            'CREATE TABLE ' . self::REGISTRY_TABLE . ' ('
-            . 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-            . 'migration_id VARCHAR(191) NOT NULL UNIQUE,'
-            . 'description VARCHAR(255) NOT NULL DEFAULT \'\','
-            . 'applied_at VARCHAR(40) NOT NULL)'
-        );
-        $checked = true;
+        // Реестр миграций создаётся сам модуль Migration (не зависит от db.sql):
+        // совместимый синтаксис для sqlite/mysql — без ENGINE/AUTOINCREMENT-специфики,
+        // в sqlite id INTEGER PRIMARY KEY автоматически = rowid (автоинкремент).
+        $driver = $this->db->driver();
+        $sql = match ($driver) {
+            'sqlite' => 'CREATE TABLE ' . self::REGISTRY_TABLE . ' ('
+                . 'id INTEGER PRIMARY KEY,'
+                . 'migration_id VARCHAR(191) NOT NULL UNIQUE,'
+                . 'description VARCHAR(255) NOT NULL DEFAULT \'\','
+                . 'applied_at VARCHAR(40) NOT NULL)',
+            default => 'CREATE TABLE ' . self::REGISTRY_TABLE . ' ('
+                . 'id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
+                . 'migration_id VARCHAR(191) NOT NULL UNIQUE,'
+                . 'description VARCHAR(255) NOT NULL DEFAULT \'\','
+                . 'applied_at VARCHAR(40) NOT NULL)',
+        };
+
+        $this->db->run($sql);
+        // Повторная проверка после CREATE: гоняем tableExists, чтобы флаг
+        // выставился только при реально существующей таблице (защита от
+        // ложных «успехов» на молчащих драйверах).
+        if (!$this->db->tableExists(self::REGISTRY_TABLE)) {
+            throw new RuntimeException(
+                'Модуль [Migration]: реестр ' . self::REGISTRY_TABLE . ' не создан — проверьте права на запись в БД.'
+            );
+        }
+        $this->registryChecked = true;
     }
 }

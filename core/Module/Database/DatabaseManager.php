@@ -156,8 +156,13 @@ final class DatabaseManager implements DatabaseInterface
             return null;
         }
 
-        if (!str_starts_with($path, '/') && $this->container->has('storage_path')) {
-            $path = rtrim((string) $this->container->get('storage_path'), '/') . '/' . $path;
+        // Относительные пути резолвим тем же способом, что и PdoConnector:
+        // от корня проекта (в конфигурации это 'storage/database.sqlite').
+        // Прежняя логика («относительный = внутри storage/») ломала симметрию:
+        // PDO открывал один файл, а tableExists смотрел filesize другого —
+        // реестр миграций ложно считался несозданным.
+        if (!str_starts_with($path, '/')) {
+            $path = rtrim(BASE_PATH, '/') . '/' . $path;
         }
 
         return $path;

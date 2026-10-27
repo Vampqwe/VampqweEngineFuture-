@@ -25,4 +25,5 @@ final class AddSlugIndexToPages extends AbstractMigration
     }
 }
 
-return static fn(DatabaseInterface $db): AbstractMigration => new AddSlugIndexToPages($db, '');
+// Фабрика: движок подставит БД и id (имя файла) сам.
+return static fn (DatabaseInterface $db, string $id): AbstractMigration => new AddSlugIndexToPages($db, $id);

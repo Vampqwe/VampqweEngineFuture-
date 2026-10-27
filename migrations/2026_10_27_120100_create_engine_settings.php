@@ -30,4 +30,5 @@ final class CreateEngineSettings extends AbstractMigration
     }
 }
 
-return static fn(DatabaseInterface $db): AbstractMigration => new CreateEngineSettings($db, '');
+// Фабрика: движок подставит БД и id (имя файла) сам.
+return static fn (DatabaseInterface $db, string $id): AbstractMigration => new CreateEngineSettings($db, $id);
