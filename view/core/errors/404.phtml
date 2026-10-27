@@ -1,0 +1,8 @@
+@extends('layouts/base')
+@section('title') 404 — {{ $title }} · {{ $appName }} @endsection
+@section('content')
+    <p class="code">404</p>
+    <h1>{{ $title }}</h1>
+    <p>Страница не найдена. Возможно, она была перемещена или ещё не создана.</p>
+    <p><a href="/">← На главную</a></p>
+@endsection

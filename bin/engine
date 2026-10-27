@@ -1,0 +1,183 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * CLI-точка входа движка: php bin/engine doctor
+ *
+ * Минимальная реализация самодиагностики: проверяет окружение,
+ * права на storage/, загрузку ядра и состояние приложения.
+ */
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Только для CLI\n");
+}
+
+define('BASE_PATH', dirname(__DIR__));
+
+require_once BASE_PATH . '/vendor/autoload.php';
+
+use App\Core\System\App;
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
+use App\Core\Module\Logger\Contracts\LoggerInterface;
+use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
+
+$command = $argv[1] ?? 'doctor';
+
+$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status'];
+if (!in_array($command, $allowed, true)) {
+    echo "Неизвестная команда: {$command}\n"
+        . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
+        . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status\n";
+    exit(1);
+}
+
+echo "🩺 VampqweEngineFuture — самодиагностика\n";
+echo str_repeat('-', 50) . "\n";
+
+// Общие для всех команд: инициализация контейнера ядра.
+$ok = true;
+
+function check(string $label, bool $pass, string $detail = ''): void
+{
+    global $ok;
+    $ok = $ok && $pass;
+    printf("%s %-28s %s\n", $pass ? '✅' : '❌', $label, $detail);
+}
+
+check('PHP >= 8.1', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION);
+check('autoload существует', is_file(BASE_PATH . '/vendor/autoload.php'));
+check('.env присутствует', is_file(BASE_PATH . '/.env'), '(иначе дефолты)');
+check('Расширение PDO', extension_loaded('pdo'), implode(',', \PDO::getAvailableDrivers()) ?: 'нет драйверов');
+// Пути проверяем НЕ хардкодом, а через единую точку правды — Support\Paths.
+$paths = new \App\Core\System\Support\Paths(BASE_PATH);
+foreach ($paths->all() as $key => $abs) {
+    if (in_array($key, ['storage', 'logs'], true)) {
+        @mkdir($abs, 0755, true);
+        check($key . '/ записи', is_writable($abs), $abs);
+    }
+}
+
+try {
+    $app = new App();
+
+    $ref  = new ReflectionClass($app);
+    $prop = $ref->getProperty('container');
+    $prop->setAccessible(true);
+    $c = $prop->getValue($app);
+
+    // --- Команды модулей Cache, Queue и Template ---
+    if ($command === 'template:clear') {
+        /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
+        $views = $c->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+        $n = $views->clearCache();
+        check('Template: кэш компиляции очищен (' . $n . ' файлов)', true);
+        echo str_repeat('-', 50) . "\n";
+        echo "ВЕРДИКТ: шаблоны будут перекомпилированы при следующем рендере 🎉\n";
+        exit(0);
+    }
+
+    if ($command === 'cache:clear') {
+        /** @var \App\Core\Module\Cache\Contracts\CacheInterface $cache */
+        $cache = $c->get(\App\Core\Module\Cache\Contracts\CacheInterface::class);
+        check('Cache: очистка', $cache->flush());
+        echo str_repeat('-', 50) . "\n";
+        echo $ok ? "ВЕРДИКТ: кэш очищен 🎉\n" : "ВЕРДИКТ: не удалось очистить кэш 👆\n";
+        exit($ok ? 0 : 1);
+    }
+
+    if ($command === 'queue:status') {
+        /** @var \App\Core\Module\Queue\Contracts\QueueInterface $queue */
+        $queue = $c->get(\App\Core\Module\Queue\Contracts\QueueInterface::class);
+        echo "📮 Очередь: драйвер '" . $queue->driver() . "', готовых задач: " . $queue->size() . "\n";
+        exit(0);
+    }
+
+    if ($command === 'queue:work') {
+        /** @var \App\Core\Module\Queue\QueueManager $queue */
+        $queue = $c->get(\App\Core\Module\Queue\Contracts\QueueInterface::class);
+        $opts  = array_slice($argv, 2);
+        $maxJobs = null;
+        $seconds = 60;
+        foreach ($opts as $o) {
+            if ($o === '--once') { $maxJobs = 1; }
+            elseif (preg_match('/^--max=(\d+)$/', $o, $m)) { $maxJobs = (int) $m[1]; }
+            elseif (preg_match('/^--seconds=(\d+)$/', $o, $m)) { $seconds = (int) $m[1]; }
+        }
+        $worker = new \App\Core\Module\Queue\Internal\Worker(
+            $queue,
+            $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
+            $c->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                ? $c->get(\App\Core\Module\Hook\Contracts\HookInterface::class) : null,
+        );
+        echo "⚙️  Worker запущен (драйвер: " . $queue->driver() . ", лимит: "
+            . ($maxJobs === null ? 'пока есть задачи' : $maxJobs . ' задач') . ", ${seconds}s)\n";
+        $stats = $worker->run($maxJobs, $seconds);
+        echo "Готово: выполнено {$stats['processed']}, retry {$stats['retried']}, "
+            . "провалено {$stats['failed']}, пауз {$stats['idle']}\n";
+        exit(0);
+    }
+
+    // --- Команды модуля Migration (версионирование схемы БД) ---
+    if (!in_array($command, ['doctor', 'cache:clear', 'queue:work', 'queue:status'], true)) {
+        /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $migrator */
+        $migrator = $c->get(\App\Core\Module\Migration\Contracts\MigratorInterface::class);
+        $arg = $argv[2] ?? null;
+
+        switch ($command) {
+            case 'migrate':
+                $done = $migrator->migrate($arg);
+                if ($done === []) {
+                    echo "✅ Миграций для применения нет. Статус: "
+                        . json_encode($migrator->status(), JSON_UNESCAPED_UNICODE) . "\n";
+                } else {
+                    foreach ($done as $id) {
+                        echo "✅ Применена миграция: {$id}\n";
+                    }
+                }
+                exit(0);
+
+            case 'migration:rollback':
+                $rolled = $migrator->rollback($arg);
+                echo $rolled === null
+                    ? "➖ Откатывать нечего (реестр пуст).\n"
+                    : "↩️  Откачена миграция: {$rolled}\n";
+                exit(0);
+
+            case 'migration:make':
+                if (!is_string($arg) || $arg === '') {
+                    echo "Использование: php bin/engine migration:make <имя_миграции>\n";
+                    exit(1);
+                }
+                echo "📝 Создана заготовка: " . $migrator->make($arg) . "\n";
+                exit(0);
+        }
+    }
+
+    check('Config загружен', $c->get(ConfigRepositoryInterface::class)->has('app.name'));
+    check('FileSystem сервис', $c->has(FileSystemInterface::class));
+    check('Logger сервис', $c->has(LoggerInterface::class));
+    check('ExceptionHandler сервис', $c->has(ExceptionHandlerInterface::class));
+
+    $installed = file_exists(BASE_PATH . '/storage/.installed');
+    check('Состояние', true, $installed ? 'Running (установлен)' : 'NotInstalled');
+
+    // Полная самодиагностика через модуль Doctor (п.9 Конституции):
+    // наличие всех контрактов ядра и сервисных модулей.
+    $doctorClass = \App\Core\Module\Doctor\Contracts\DoctorInterface::class;
+    if ($c->has($doctorClass)) {
+        /** @var \App\Core\Module\Doctor\Contracts\DoctorInterface $doctor */
+        $doctor = $c->get($doctorClass);
+        foreach ($doctor->check() as $item) {
+            check('Модуль: ' . $item['name'], $item['ok'], $item['message']);
+        }
+    }
+} catch (\Throwable $e) {
+    check('Инициализация ядра', false, $e->getMessage());
+}
+
+echo str_repeat('-', 50) . "\n";
+echo $ok ? "ВЕРДИКТ: всё в порядке 🎉\n" : "ВЕРДИКТ: есть проблемы 👆\n";
+exit($ok ? 0 : 1);
