@@ -18,7 +18,9 @@ class SecurityServiceProvider implements ModuleProviderInterface
 {
     public function register(ContainerInterface $container): void
     {
-        $container->bind(SecurityInterface::class, static fn(): Security => new Security());
+        $container->bind(SecurityInterface::class, static function (ContainerInterface $c): Security {
+            return new Security($c->get(\App\Core\Module\Config\Contracts\ConfigRepositoryInterface::class));
+        });
     }
 
     public function boot(): void

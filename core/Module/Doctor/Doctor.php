@@ -35,6 +35,7 @@ final class Doctor implements DoctorInterface
             'Error'       => \App\Core\Module\Error\Contracts\ErrorPageInterface::class,
             'Installer'   => \App\Core\Module\Installer\Contracts\InstallerInterface::class,
             'ArrayHelper' => \App\Core\Module\ArrayHelper\Contracts\ArrayHelperInterface::class,
+            'Session'     => \App\Core\Module\Session\Contracts\SessionInterface::class,
         ],
     ) {
     }
@@ -122,7 +123,22 @@ final class Doctor implements DoctorInterface
                     $hash = $instance->hashPassword('doctor-probe-123');
                     $pwd  = $instance->verifyPassword('doctor-probe-123', $hash)
                         && !$instance->verifyPassword('wrong', $hash);
-                    return [$tok && $pwd, 'работает (токены + argon2id пароли; csrf/encrypt в плане)'];
+                    // encrypt/decrypt probe: требует APP_KEY (пишет инсталлятор)
+                    $cryptoNote = 'csrf-генерация введена';
+                    try {
+                        $enc = $instance->encrypt('doctor-probe');
+                        $pwd = $pwd && $instance->decrypt($enc) === 'doctor-probe'
+                            && $instance->decrypt('tampered') === null;
+                        $cryptoNote = 'AES-256-GCM работает';
+                    } catch (\RuntimeException) {
+                        $cryptoNote = 'encrypt ждёт APP_KEY (.env)';
+                    }
+                    return [$tok && $pwd, "работает (токены + argon2id + {$cryptoNote})"];
+                case 'Session':
+                    /** @var \App\Core\Module\Session\Contracts\SessionInterface $instance */
+                    $token = $instance->csrfToken();
+                    $ok = strlen($token) >= 32 && $instance->validateCsrf($token) && !$instance->validateCsrf('bad');
+                    return [$ok, 'работает (driver: ' . ($_ENV['SESSION_DRIVER'] ?? 'file') . ', csrf)'];
                 case 'Database':
                     /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $instance */
                     $driver = $instance->driver();
