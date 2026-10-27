@@ -13,12 +13,15 @@ class Response
 
     public function send(): void
     {
-        http_response_code($this->statusCode);
+        // Не отдаём заголовки, если вывод уже начался (иначе PHP выдаст warning)
+        if (!headers_sent()) {
+            http_response_code($this->statusCode);
         
-        foreach ($this->headers as $name => $value) {
-            header("{$name}: {$value}");
+            foreach ($this->headers as $name => $value) {
+                header("{$name}: {$value}");
+            }
         }
-        
+
         echo $this->body;
     }
 }

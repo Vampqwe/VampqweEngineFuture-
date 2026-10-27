@@ -34,8 +34,8 @@ class ExceptionHandler implements ExceptionHandlerInterface
 
     public function render(Request $request, Throwable $exception): Response
     {
-        // Логируем исключение
-        $this->report($exception);
+        // NOTE: report() вызывается только один раз — в ExceptionServiceProvider::handleException().
+        // Здесь НЕ логируем, иначе каждая ошибка пишется в лог дважды.
 
         // Определяем HTTP-статус
         $statusCode = $this->getStatusCode($exception);
