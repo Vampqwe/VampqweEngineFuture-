@@ -46,6 +46,9 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         // Migration — опциональная зависимость: после развёртки db.sql автоматически
         // применяются ожидающие версии схемы (migrations/ <- Paths).
         private readonly ?MigratorInterface $migrator = null,
+        // Template — опциональная зависимость для страниц установщика (view/core/installer/*);
+        // без неё — graceful fallback на внутренний InstallerView.
+        private readonly ?\App\Core\Module\Template\Contracts\TemplateInterface $views = null,
     ) {
     }
 
@@ -151,29 +154,124 @@ final class Installer implements InstallerInterface, InstallerPageInterface
     }
 
     // ==================== InstallerPageInterface ====================
+    //
+    // Страницы рендерятся через модуль Template (view/core/installer/*).
+    // Если Template ещё не зарегистрирован (ранняя стадия бутстрапа) —
+    // graceful fallback на внутренний InstallerView, чтобы инсталлятор
+    // работал даже при частичной инициализации ядра.
 
     public function requirementsPage(array $checks): string
     {
-        $rows = '';
-        foreach ($checks as $label => $ok) {
-            $cls  = $ok ? 'ok' : 'fail';
-            $icon = $ok ? '&#10004;' : '&#10008;';
-            $rows .= '<tr><td>' . InstallerView::esc((string) $label) . '</td>'
-                   . '<td class="' . $cls . '">' . $icon . ' ' . ($ok ? 'OK' : 'НЕ ОБНАРУЖЕНО') . '</td></tr>';
+        if ($this->views() !== null) {
+            $rows = [];
+            foreach ($checks as $label => $ok) {
+                $rows[] = [
+                    'label'   => (string) $label,
+                    'class'   => $ok ? 'ok' : 'fail',
+                    'icon'    => $ok ? '&#10004;' : '&#10008;',
+                    'verdict' => $ok ? 'OK' : 'НЕ ОБНАРУЖЕНО',
+                ];
+            }
+            return $this->renderOrFallback(
+                'installer/requirements',
+                ['title' => 'Установка VampqweEngineFuture', 'rows' => $rows,
+                 'allOk' => !in_array(false, $checks, true), 'step' => 1],
+                fn(): string => InstallerView::page('Установка VampqweEngineFuture',
+                    '<div class="sub">Проверка окружения перед установкой движка.</div>'
+                    . '<h2>Требования</h2><table>' . $this->legacyRows($checks) . '</table>'
+                    . (!in_array(false, $checks, true)
+                        ? '<form method="post" action="/install/settings"><button>Перейти к настройкам &rarr;</button></form>'
+                        : '<div class="errbox">Устраните проблемы выше и обновите страницу.</div>'),
+                    ['step' => 1])
+            );
         }
 
-        $allOk = !in_array(false, $checks, true);
-        $cta   = $allOk
-            ? '<form method="post" action="/install/settings"><button>Перейти к настройкам &rarr;</button></form>'
-            : '<div class="errbox">Устраните проблемы выше и обновите страницу.</div>';
-
-        $body = '<div class="sub">Проверка окружения перед установкой движка.</div>'
-              . '<h2>Требования</h2><table>' . $rows . '</table>' . $cta;
-
-        return InstallerView::page('Установка VampqweEngineFuture', $body, ['step' => 1]);
+        return InstallerView::page('Установка VampqweEngineFuture',
+            '<div class="sub">Проверка окружения перед установкой движка.</div>'
+            . '<h2>Требования</h2><table>' . $this->legacyRows($checks) . '</table>'
+            . (!in_array(false, $checks, true)
+                ? '<form method="post" action="/install/settings"><button>Перейти к настройкам &rarr;</button></form>'
+                : '<div class="errbox">Устраните проблемы выше и обновите страницу.</div>'),
+            ['step' => 1]);
     }
 
     public function settingsForm(array $errors = []): string
+    {
+        $name = (string) $this->config->get('app.name', 'VampqweEngineFuture');
+
+        if ($this->views() !== null) {
+            return $this->renderOrFallback(
+                'installer/settings',
+                ['title' => 'Настройка движка', 'errors' => $errors, 'appName' => $name,
+                 'timezones' => \DateTimeZone::listIdentifiers(), 'selectedTz' => 'Europe/Moscow', 'step' => 2],
+                fn(): string => $this->legacySettingsForm($errors)
+            );
+        }
+
+        return $this->legacySettingsForm($errors);
+    }
+
+    public function successPage(array $summary): string
+    {
+        if ($this->views() !== null) {
+            return $this->renderOrFallback(
+                'installer/success',
+                ['title' => 'Установка завершена', 'summary' => $summary, 'step' => 3],
+                fn(): string => $this->legacySuccess($summary)
+            );
+        }
+
+        return $this->legacySuccess($summary);
+    }
+
+    public function failurePage(string $reason): string
+    {
+        if ($this->views() !== null) {
+            return $this->renderOrFallback(
+                'installer/failure',
+                ['title' => 'Ошибка установки', 'reason' => $reason, 'step' => 2],
+                fn(): string => $this->legacyFailure($reason)
+            );
+        }
+
+        return $this->legacyFailure($reason);
+    }
+
+    // ==================== page-rendering helpers ====================
+
+    /** Шаблонный рендер с защитой: сломанный шаблон -> legacy-страница, не фатал. */
+    private function renderOrFallback(string $tpl, array $data, callable $fallback): string
+    {
+        try {
+            $views = $this->views();
+            if ($views !== null && $views->exists($tpl, \App\Core\Module\Template\Contracts\TemplateInterface::SCOPE_CORE)) {
+                return $views->renderCore($tpl, $data);
+            }
+        } catch (\Throwable) {
+            // шаблон бросил — отдаём legacy-версию вместо падения установщика
+        }
+
+        return $fallback();
+    }
+
+    /** Template доступен? (иначе — fallback InstallerView). */
+    private function views(): ?\App\Core\Module\Template\Contracts\TemplateInterface
+    {
+        return $this->views;
+    }
+
+    private function legacyRows(array $checks): string
+    {
+        $rows = '';
+        foreach ($checks as $label => $ok) {
+            $rows .= '<tr><td>' . InstallerView::esc((string) $label) . '</td>'
+                   . '<td class="' . ($ok ? 'ok' : 'fail') . '">'
+                   . ($ok ? '&#10004; OK' : '&#10008; НЕ ОБНАРУЖЕНО') . '</td></tr>';
+        }
+        return $rows;
+    }
+
+    private function legacySettingsForm(array $errors): string
     {
         $errBox = '';
         if ($errors !== []) {
@@ -206,7 +304,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         return InstallerView::page('Настройка движка', $body, ['step' => 2]);
     }
 
-    public function successPage(array $summary): string
+    private function legacySuccess(array $summary): string
     {
         $rows = '';
         foreach ($summary as $k => $v) {
@@ -221,7 +319,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         return InstallerView::page('Установка завершена', $body, ['step' => 3]);
     }
 
-    public function failurePage(string $reason): string
+    private function legacyFailure(string $reason): string
     {
         $body = '<div class="errbox">&#10060; ' . InstallerView::esc($reason) . '</div>'
               . '<form method="get" action="/install"><button>Попробовать снова</button></form>';

@@ -1,0 +1,17 @@
+@extends('layouts/installer')
+@section('title') Установка VampqweEngineFuture @endsection
+@section('content')
+<h1>Установка VampqweEngineFuture</h1>
+<div class="sub">Проверка окружения перед установкой движка.</div>
+<h2>Требования</h2>
+<table>
+@foreach($rows as $row)
+    <tr><td>{{ $row['label'] }}</td><td class="{{ $row['class'] }}">{{ $row['icon'] }} {{ $row['verdict'] }}</td></tr>
+@endforeach
+</table>
+@if($allOk)
+    <form method="post" action="/install/settings"><button>Перейти к настройкам &rarr;</button></form>
+@else
+    <div class="errbox">Устраните проблемы выше и обновите страницу.</div>
+@endif
+@endsection

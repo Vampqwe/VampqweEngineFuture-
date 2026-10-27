@@ -41,6 +41,10 @@ class InstallerServiceProvider implements ModuleProviderInterface
                 $c->has('database_path') ? (string) $c->get('database_path') : '',
                 // Migration — опционально: автоприменение версий схемы после db.sql.
                 $c->has(MigratorInterface::class) ? $c->get(MigratorInterface::class) : null,
+                // Template — опционально: страницы установщика через view/core/installer/*.
+                $c->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)
+                    ? $c->get(\App\Core\Module\Template\Contracts\TemplateInterface::class)
+                    : null,
             );
         });
 
