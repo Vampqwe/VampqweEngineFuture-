@@ -31,6 +31,9 @@ final class Migrator implements MigratorInterface
     /** Имя таблицы-реестра применённых миграций. */
     public const REGISTRY_TABLE = 'engine_migrations';
 
+    /** Кэш резолва файлов миграций на процесс (см. resolve()). id => экземпляр/фабрика. */
+    private static array $loaded = [];
+
     /**
      * Шаблон заготовки миграции (make()). Замещаемые токены:
      * {{CLASS}} — имя класса, {{ID}} — id файла, {{DESCRIPTION}} — описание.
@@ -283,7 +286,13 @@ PHP;
 
     private function resolve(string $id, string $file): MigrationInterface
     {
-        $factory = require $file;
+        // Файл миграции резолвится один раз за процесс: повторный require
+        // вызвал бы фатальную "Cannot declare class", а require_once вернул бы
+        // true вместо возвращаемой фабрики.
+        if (!isset(self::$loaded[$file])) {
+            self::$loaded[$file] = require $file;
+        }
+        $factory = self::$loaded[$file];
 
         // Допускаются два стиля файла миграций:
         //  1) return new SomeMigration($db, '...'); — готовый экземпляр (обратная совместимость);
