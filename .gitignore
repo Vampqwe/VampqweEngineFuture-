@@ -1,5 +1,2 @@
-.env
+storage/.session_store.file
 logs/
-*.log
-storage/database.sqlite
-storage/.installed
