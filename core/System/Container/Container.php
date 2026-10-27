@@ -54,7 +54,15 @@ class Container implements ContainerInterface
 
         // Автоматическое разрешение: если это существующий класс — соберём по конструктору
         if (class_exists($abstract)) {
-            $instance = $this->autowire($abstract);
+            if (isset($this->resolving[$abstract])) {
+                throw new \RuntimeException("Циклическая зависимость сервиса [{$abstract}].");
+            }
+            $this->resolving[$abstract] = true;
+            try {
+                $instance = $this->autowire($abstract);
+            } finally {
+                unset($this->resolving[$abstract]);
+            }
             $this->instances[$abstract] = $instance;
             return $instance;
         }

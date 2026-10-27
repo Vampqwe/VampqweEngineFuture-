@@ -1,0 +1,15 @@
+[2026-10-27 06:26:47] INFO: test-info-message
+[2026-10-27 06:26:47] ERROR: test-error-message
+[2026-10-27 06:26:47] ERROR: probe-double-log
+[2026-10-27 06:26:47] ERROR: App\Core\Module\Exception\ExceptionHandler::render(): Argument #1 ($request) must be of type App\Core\System\Http\Request, RuntimeException given, called in /tmp/test-logger.php on line 27
+[2026-10-27 06:26:56] INFO: test-info-message
+[2026-10-27 06:26:56] ERROR: probe-double-log-1793082416.5899
+[2026-10-27 06:26:56] ERROR: Object of class App\Core\System\Http\Response could not be converted to string
+[2026-10-27 06:27:01] INFO: test-info-message
+[2026-10-27 06:27:01] ERROR: probe-double-log-FIXED
+[2026-10-27 06:27:03] INFO: test-info-message
+[2026-10-27 06:27:03] ERROR: probe-double-log-FIXED
+[2026-10-27 06:27:10] ERROR: warn-with-context
+[2026-10-27 06:27:14] ERROR: probe-error-handler-works
+[2026-10-27 06:27:16] ERROR: probe-error-handler-works
+[2026-10-27 06:27:56] ERROR: http-probe-exception
