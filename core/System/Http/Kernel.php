@@ -5,6 +5,8 @@ namespace App\Core\System\Http;
 
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Error\Contracts\ErrorPageInterface;
+use App\Core\Module\Installer\Contracts\InstallerInterface;
+use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Enums\AppState;
 use App\Core\System\Support\Router;
@@ -18,6 +20,12 @@ class Kernel
     public function handle(Request $request): Response
     {
         $state = $this->detectAppState();
+
+        // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
+        // до установки это единственный способ довести движок до Running.
+        if ($this->isInstallerPath($request->path)) {
+            return $this->installerResponse($request);
+        }
 
         // Для состояний вне Running отдаём служебные страницы,
         // игнорируя маршрутизацию (кроме /system/health — он доступен всегда).
@@ -78,7 +86,75 @@ class Kernel
     {
         return str_starts_with($path, '/system/')
             || str_starts_with($path, '/admin')
-            || str_starts_with($path, '/api/system');
+            || str_starts_with($path, '/api/system')
+            || $this->isInstallerPath($path);
+    }
+
+    private function isInstallerPath(string $path): bool
+    {
+        return $path === '/install'
+            || str_starts_with($path, '/install/')
+            || $path === '/setup';
+    }
+
+    /**
+     * Системная дорога инсталлятора: GET /install (шаг 1), POST /install/settings (шаг 2),
+     * POST /install/run (выполнение установки). Вся логика — через контракты InstallerInterface
+     * и InstallerPageInterface (п.2/п.3 Конституции), HTML формирует модуль Installer.
+     */
+    private function installerResponse(Request $request): Response
+    {
+        if (!$this->container->has(InstallerInterface::class)) {
+            return new Response('<h1>503</h1><p>Модуль Installer недоступен.</p>', 503);
+        }
+
+        $installer = $this->container->get(InstallerInterface::class);
+        $pages     = $this->container->get(InstallerPageInterface::class);
+        assert($pages instanceof InstallerPageInterface);
+
+        $path   = $request->path;
+        $method = $request->method;
+
+        // Шаг 1: требования окружения
+        if (($path === '/install' || $path === '/setup') && $method === 'GET') {
+            if ($installer->isInstalled()) {
+                return new Response($pages->successPage(['Движок уже установлен' => 'да', 'Открыть сайт' => '/']), 200);
+            }
+            return new Response($pages->requirementsPage($installer->requirements()), 200);
+        }
+
+        // Шаг 2: форма настроек
+        if ($path === '/install/settings' && $method === 'POST') {
+            $errors = \App\Core\Module\Installer\Installer::validateSettings($request->post);
+            return new Response($pages->settingsForm($errors), $errors === [] ? 200 : 422);
+        }
+
+        // Шаг 3: выполнение установки
+        if ($path === '/install/run' && $method === 'POST') {
+            $errors = \App\Core\Module\Installer\Installer::validateSettings($request->post);
+            if ($errors !== []) {
+                return new Response($pages->settingsForm($errors), 422);
+            }
+
+            $ok = $installer->install([
+                'app_name' => (string) ($request->post['app_name'] ?? ''),
+                'timezone' => (string) ($request->post['timezone'] ?? 'UTC'),
+                'debug'    => isset($request->post['debug']),
+            ]);
+
+            if (!$ok) {
+                return new Response($pages->failurePage('Не удалось записать файлы установки (проверьте права на storage/ и logs/).'), 500);
+            }
+
+            return new Response($pages->successPage([
+                'Название сайта' => (string) ($request->post['app_name'] ?? 'VampqweEngineFuture'),
+                'Часовой пояс'   => (string) ($request->post['timezone'] ?? 'UTC'),
+                'Режим отладки'  => isset($request->post['debug']),
+                '.env создан'    => is_file((string) $this->container->get('base_path') . '/.env'),
+            ]), 201);
+        }
+
+        return $this->errorPage(404);
     }
 
     private function isHealthCheck(Request $request): bool
@@ -131,7 +207,7 @@ class Kernel
         $code = $state === AppState::Error ? 500 : 503;
 
         $title = match ($state) {
-            AppState::NotInstalled => '🚀 Движок не установлен. Запускаем Installer...',
+            AppState::NotInstalled => '🚀 Движок не установлен. Перейдите на <a href="/install" style="color:#a9c7ff">/install</a> — запустится установщик.',
             AppState::Installing   => '⚙️ Идет процесс установки...',
             AppState::Maintenance  => '🔧 Сайт находится в режиме технического обслуживания.',
             AppState::Upgrading    => '⬆️ Идет обновление движка...',

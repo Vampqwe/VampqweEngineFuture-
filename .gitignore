@@ -1,7 +1,1 @@
-*.bundle
-
-# runtime артефакты
-/logs/
-/storage/cache/
-/vendor/
 .env
