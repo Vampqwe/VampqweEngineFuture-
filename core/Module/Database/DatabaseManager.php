@@ -7,6 +7,7 @@ use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\Database\Internal\Connectors\PdoConnector;
 use App\Core\Module\Database\Internal\QueryBuilders\QueryBuilder;
+use App\Core\Module\Database\Internal\Schema\SqlFileRunner;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use PDO;
 use RuntimeException;
@@ -87,6 +88,36 @@ final class DatabaseManager implements DatabaseInterface
     public function query(string $table): object
     {
         return new QueryBuilder($this, $table);
+    }
+
+    /**
+     * Прогон SQL-дампа (например database/db.sql) через активное PDO-соединение.
+     * Реализация DatabaseInterface::migrate(). Идемпотентность обеспечивает вызывающий
+     * (Installer проверяет наличие таблиц перед прогоном).
+     *
+     * @return int количество выполненных операторов
+     */
+    public function migrate(string $sql): int
+    {
+        return count((new SqlFileRunner())->run($this->pdo(), $sql));
+    }
+
+    /** Существует ли таблица в активной БД (information_schema/sqlite_master). */
+    public function tableExists(string $table): bool
+    {
+        if (!preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            throw new RuntimeException("Модуль [Database]: недопустимое имя таблицы '{$table}'.");
+        }
+
+        return match ($this->driver()) {
+            'mysql'  => (bool) $this->selectOne(
+                'SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+                [$table],
+            ),
+            'pgsql'  => (bool) $this->selectOne('SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_name = ?', [$table]),
+            'sqlite' => (bool) $this->selectOne('SELECT COUNT(*) AS c FROM sqlite_master WHERE type = ? AND name = ?', ['table', $table]),
+            default  => false,
+        };
     }
 
     public function driver(): string

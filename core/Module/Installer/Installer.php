@@ -41,6 +41,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         private readonly ConfigRepositoryInterface $config,
         private readonly LoggerInterface $logger,
         private readonly ?DatabaseInterface $db = null,
+        private readonly string $databasePath = '',
     ) {
     }
 
@@ -66,10 +67,18 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         return $checks;
     }
 
-    public function install(array $options = []): bool
+    /**
+     * Выполняет установку (env -> флаги -> database -> схема db.sql).
+     *
+     * @param array<string,mixed> $options
+     * @return array<string,string>|true  true при успехе без деталей;
+     *         массив «шаг => результат» — чтобы UI/CLI показывали итог БД и схемы.
+     */
+    public function install(array $options = []): array|bool
     {
         $flagFile = $this->storagePath . '/' . self::FLAG_INSTALLING;
         $this->fs->createFile($flagFile);
+        $summary = [];
 
         try {
             // app.key генерируется один раз; существующий .env не перетираем
@@ -97,13 +106,15 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             // Флаг готовности — AppState::Running определяется по нему
             $this->fs->createFile($this->storagePath . '/' . self::FLAG_INSTALLED);
 
-            // Database-шаг: создаём БД, если активный драйвер включён и доступен.
-            // Недоступная СУБД НЕ валит установку — ошибка уходит в лог канала Installer.
-            $dbSummary = $this->tryCreateDatabase();
+            // Database-шаг: создаём БД (если активный драйвер включён и доступен)
+            // и прогоняем схему database/db.sql. Недоступная СУБД НЕ валит установку —
+            // ошибка уходит в лог канала Installer (п.9: движок не падает из-за соседей).
+            $summary['database'] = $this->tryCreateDatabase();
+            $summary['schema']   = $this->applySchema();
 
             $this->logger->info('Установка завершена успешно', ['channel' => 'Installer']);
 
-            return true;
+            return $summary;
         } catch (Throwable $e) {
             $this->logger->error('Установка прервана: ' . $e->getMessage(), [
                 'channel' => 'Installer',
@@ -261,6 +272,49 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         $p = $this->config->get('paths.logs');
 
         return is_string($p) && $p !== '' ? $p : $this->basePath . DIRECTORY_SEPARATOR . 'logs';
+    }
+
+    /**
+     * Schema-шаг установки: прогон дампа database/db.sql через Database::migrate().
+     * Идемпотентно: если таблица схемы уже существует — повторный пропуск не выполняется.
+     * Путь к папке приходит ИЗ ЕДИНОЙ ТОЧКИ ПРАВДЫ (database_path <- Support\Paths).
+     */
+    private function applySchema(): string
+    {
+        if ($this->db === null) {
+            return 'пропущено (модуль Database недоступен)';
+        }
+
+        try {
+            if (!$this->db->ping()) {
+                return 'пропущено (СУБД недоступна — включите драйвер и повторите миграцию позже)';
+            }
+
+            // Фиксированное имя дампа; папка — только из Paths, без dirname/конкатенаций корня.
+            $dumpFile = rtrim($this->databasePath, '/') . '/db.sql';
+            if (!is_file($dumpFile)) {
+                return "пропущено (не найден {$dumpFile})";
+            }
+
+            // Идемпотентность: если одна из таблиц схемы уже есть — БД считается развёрнутой.
+            if ($this->db->tableExists('pages')) {
+                return 'уже развёрнута (таблицы схемы обнаружены, пропущено)';
+            }
+
+            $statements = $this->db->migrate((string) file_get_contents($dumpFile));
+
+            $this->logger->info("Схема БД развёрнута: {$statements} операторов из db.sql", [
+                'channel' => 'Installer',
+            ]);
+
+            return "развёрнута ({$statements} операторов из db.sql)";
+        } catch (Throwable $e) {
+            $this->logger->warning('Schema-шаг установки не выполнен: ' . $e->getMessage(), [
+                'channel' => 'Installer',
+            ]);
+
+            return 'предупреждение: ' . $e->getMessage();
+        }
     }
 
     /**

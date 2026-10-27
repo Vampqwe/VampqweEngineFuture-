@@ -30,6 +30,12 @@ interface DatabaseInterface
     /** Построитель запросов (возвращается как object — точный тип появится с реализацией). */
     public function query(string $table): object;
 
+    /** Прогон SQL-дампа (DDL схемы) через активное соединение. @return int выполненных операторов */
+    public function migrate(string $sql): int;
+
+    /** Существует ли таблица в активной БД (идемпотентность миграций/схемы). */
+    public function tableExists(string $table): bool;
+
     /** Активный драйвер (mysql|pgsql|sqlite) — для Doctor/диагностики. */
     public function driver(): string;
 

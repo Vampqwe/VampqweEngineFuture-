@@ -30,6 +30,7 @@ final class Paths
         'logs'        => 'logs',           // логи модулей: logs/<дата>/<канал>.log
         'cache'       => 'storage/cache',  // кэш движка
         'sessions'    => 'storage/sessions', // file-стор сессий (Session, driver=file)
+        'database'    => 'database',       // SQL-дампы схемы движка (db.sql) — источник для Installer/миграций
     ];
 
     public function __construct(private readonly string $basePath)

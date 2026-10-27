@@ -218,24 +218,31 @@ class Kernel
                 return new Response($pages->settingsForm($errors), 422);
             }
 
-            $ok = $installer->install([
+            $result = $installer->install([
                 'app_name'             => (string) ($request->post['app_name'] ?? ''),
                 'timezone'             => (string) ($request->post['timezone'] ?? 'UTC'),
                 'debug'                => isset($request->post['debug']),
                 'super_admin_password' => (string) ($request->post['super_admin_password'] ?? ''),
             ]);
 
-            if (!$ok) {
+            if ($result === false) {
                 return new Response($pages->failurePage('Не удалось записать файлы установки (проверьте права на storage/ и logs/).'), 500);
             }
 
-            return new Response($pages->successPage([
+            $summary = [
                 'Название сайта'           => (string) ($request->post['app_name'] ?? 'VampqweEngineFuture'),
                 'Часовой пояс'             => (string) ($request->post['timezone'] ?? 'UTC'),
                 'Режим отладки'            => isset($request->post['debug']),
                 'Супер-администратор'      => \App\Core\System\Support\SuperAdmin::USERNAME . ' (пароль задан, хеш — в .env)',
                 '.env создан'              => is_file((string) $this->container->get('base_path') . '/.env'),
-            ]), 201);
+            ];
+            // Детали Database-шага (создание БД + развёртывание схемы db.sql), если install() их вернул.
+            if (is_array($result)) {
+                $summary['База данных']    = $result['database'] ?? '—';
+                $summary['Схема (db.sql)'] = $result['schema'] ?? '—';
+            }
+
+            return new Response($pages->successPage($summary), 201);
         }
 
         return $this->errorPage(404);

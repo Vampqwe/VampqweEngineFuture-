@@ -34,8 +34,10 @@ class InstallerServiceProvider implements ModuleProviderInterface
                 $c->get(ConfigRepositoryInterface::class),
                 $c->get(LoggerInterface::class),
                 // Database — опциональная зависимость: без СУБД установка возможна,
-                // с доступной — Installer создаст базу на шаге install().
+                // с доступной — Installer создаст базу и прогонит схему db.sql.
                 $c->has(DatabaseInterface::class) ? $c->get(DatabaseInterface::class) : null,
+                // Папка дампов схемы — из единой точки правды Paths (п.7).
+                $c->has('database_path') ? (string) $c->get('database_path') : '',
             );
         });
 
