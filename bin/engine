@@ -26,11 +26,11 @@ use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 
 $command = $argv[1] ?? 'doctor';
 
-$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'queue:work', 'queue:status'];
+$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status'];
 if (!in_array($command, $allowed, true)) {
     echo "Неизвестная команда: {$command}\n"
         . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
-        . " | cache:clear | queue:work [--once|--max=N|--seconds=N] | queue:status\n";
+        . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status\n";
     exit(1);
 }
 
@@ -68,7 +68,17 @@ try {
     $prop->setAccessible(true);
     $c = $prop->getValue($app);
 
-    // --- Команды модулей Cache и Queue ---
+    // --- Команды модулей Cache, Queue и Template ---
+    if ($command === 'template:clear') {
+        /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
+        $views = $c->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+        $n = $views->clearCache();
+        check('Template: кэш компиляции очищен (' . $n . ' файлов)', true);
+        echo str_repeat('-', 50) . "\n";
+        echo "ВЕРДИКТ: шаблоны будут перекомпилированы при следующем рендере 🎉\n";
+        exit(0);
+    }
+
     if ($command === 'cache:clear') {
         /** @var \App\Core\Module\Cache\Contracts\CacheInterface $cache */
         $cache = $c->get(\App\Core\Module\Cache\Contracts\CacheInterface::class);

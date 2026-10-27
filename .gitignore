@@ -1,2 +1,2 @@
-.env.test.tmp
-storage/cache/templates/
+storage/.session_store.file
+storage/cache/

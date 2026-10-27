@@ -192,7 +192,14 @@ final class Doctor implements DoctorInterface
                     $size   = $instance->size();
                     return [true, "работает (драйвер: {$driver}, задач в очереди: {$size})"];
                 case 'Template':
-                    return [true, 'заглушка (реализация в плане; шаблонов нет)'];
+                    /** @var \App\Core\Module\Template\Contracts\TemplateInterface $instance */
+                    // Реальная проба: рендер строкового шаблона с экранированием.
+                    $out = $instance->renderString('{{$v}}', ['v' => '<b>']);
+                    if ($out !== '&lt;b&gt;') {
+                        return [false, 'НЕЗДОРОВ: renderString не экранирует вывод (XSS-риск)'];
+                    }
+                    $coreTpl = $instance->exists('layouts/base', \App\Core\Module\Template\Contracts\TemplateInterface::SCOPE_CORE);
+                    return [true, 'работает (рендер+экранирование OK, layout ядра: ' . ($coreTpl ? 'есть' : 'нет') . ')'];
                 case 'Installer':
                     // Реальная проба: requirements() обязан вернуть полные проверки.
                     $req = $instance->requirements();
