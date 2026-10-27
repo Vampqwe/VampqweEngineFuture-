@@ -29,7 +29,8 @@ final class Paths
         'app_view'    => 'view/app',   // пользовательские темы сайтов (мультисайт): view/app/<theme>/
         'modules_app' => 'app/modules',
         'logs'        => 'logs',           // логи модулей: logs/<дата>/<канал>.log
-        'cache'       => 'storage/cache',  // кэш движка
+        'cache'       => 'storage/cache',  // кэш движка (Cache, driver=file): storage/cache/<hh>/<key>.cache
+        'queue'       => 'storage/queue',  // очереди задач (Queue, driver=file): pending/delayed/failed
         'sessions'    => 'storage/sessions', // file-стор сессий (Session, driver=file)
         'database'    => 'database',       // SQL-дампы схемы движка (db.sql) — источник для Installer/миграций
         'migrations'  => 'migrations',     // версии схемы БД (Migration): <ГГГГ_ММ_ДД_HHMMSS>_имя.php

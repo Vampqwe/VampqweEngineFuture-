@@ -26,9 +26,11 @@ use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 
 $command = $argv[1] ?? 'doctor';
 
-if (!in_array($command, ['doctor', 'migrate', 'migration:rollback', 'migration:make'], true)) {
+$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'queue:work', 'queue:status'];
+if (!in_array($command, $allowed, true)) {
     echo "Неизвестная команда: {$command}\n"
-        . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>\n";
+        . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
+        . " | cache:clear | queue:work [--once|--max=N|--seconds=N] | queue:status\n";
     exit(1);
 }
 
@@ -66,8 +68,50 @@ try {
     $prop->setAccessible(true);
     $c = $prop->getValue($app);
 
+    // --- Команды модулей Cache и Queue ---
+    if ($command === 'cache:clear') {
+        /** @var \App\Core\Module\Cache\Contracts\CacheInterface $cache */
+        $cache = $c->get(\App\Core\Module\Cache\Contracts\CacheInterface::class);
+        check('Cache: очистка', $cache->flush());
+        echo str_repeat('-', 50) . "\n";
+        echo $ok ? "ВЕРДИКТ: кэш очищен 🎉\n" : "ВЕРДИКТ: не удалось очистить кэш 👆\n";
+        exit($ok ? 0 : 1);
+    }
+
+    if ($command === 'queue:status') {
+        /** @var \App\Core\Module\Queue\Contracts\QueueInterface $queue */
+        $queue = $c->get(\App\Core\Module\Queue\Contracts\QueueInterface::class);
+        echo "📮 Очередь: драйвер '" . $queue->driver() . "', готовых задач: " . $queue->size() . "\n";
+        exit(0);
+    }
+
+    if ($command === 'queue:work') {
+        /** @var \App\Core\Module\Queue\QueueManager $queue */
+        $queue = $c->get(\App\Core\Module\Queue\Contracts\QueueInterface::class);
+        $opts  = array_slice($argv, 2);
+        $maxJobs = null;
+        $seconds = 60;
+        foreach ($opts as $o) {
+            if ($o === '--once') { $maxJobs = 1; }
+            elseif (preg_match('/^--max=(\d+)$/', $o, $m)) { $maxJobs = (int) $m[1]; }
+            elseif (preg_match('/^--seconds=(\d+)$/', $o, $m)) { $seconds = (int) $m[1]; }
+        }
+        $worker = new \App\Core\Module\Queue\Internal\Worker(
+            $queue,
+            $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
+            $c->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                ? $c->get(\App\Core\Module\Hook\Contracts\HookInterface::class) : null,
+        );
+        echo "⚙️  Worker запущен (драйвер: " . $queue->driver() . ", лимит: "
+            . ($maxJobs === null ? 'пока есть задачи' : $maxJobs . ' задач') . ", ${seconds}s)\n";
+        $stats = $worker->run($maxJobs, $seconds);
+        echo "Готово: выполнено {$stats['processed']}, retry {$stats['retried']}, "
+            . "провалено {$stats['failed']}, пауз {$stats['idle']}\n";
+        exit(0);
+    }
+
     // --- Команды модуля Migration (версионирование схемы БД) ---
-    if ($command !== 'doctor') {
+    if (!in_array($command, ['doctor', 'cache:clear', 'queue:work', 'queue:status'], true)) {
         /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $migrator */
         $migrator = $c->get(\App\Core\Module\Migration\Contracts\MigratorInterface::class);
         $arg = $argv[2] ?? null;

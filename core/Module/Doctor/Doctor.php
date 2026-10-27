@@ -176,9 +176,21 @@ final class Doctor implements DoctorInterface
                     }
                     return [true, "схема в актуальном состоянии ({$st['applied']} миграций)"];
                 case 'Cache':
-                    return [true, 'заглушка (реализация в плане; remember деградирует безопасно)'];
+                    /** @var \App\Core\Module\Cache\Contracts\CacheInterface $instance */
+                    $probeKey = 'doctor:cache:probe';
+                    $instance->forget($probeKey);
+                    $written = $instance->set($probeKey, ['ping' => 1], 30);
+                    $hit     = $instance->get($probeKey);
+                    $memo    = $instance->remember('doctor:cache:memo', 30, static fn(): int => 42);
+                    $instance->forget('doctor:cache:memo');
+                    $ok = $written && $hit === ['ping' => 1] && $memo === 42;
+                    $driver = method_exists($instance, 'driver') ? $instance->driver() : '?';
+                    return [$ok, $ok ? "работает (PDO-free, драйвер: {$driver})" : 'НЕЗДОРОВ: set/get roundtrip не пройден'];
                 case 'Queue':
-                    return [true, 'заглушка (реализация в плане; size=0)'];
+                    /** @var \App\Core\Module\Queue\Contracts\QueueInterface $instance */
+                    $driver = $instance->driver();
+                    $size   = $instance->size();
+                    return [true, "работает (драйвер: {$driver}, задач в очереди: {$size})"];
                 case 'Template':
                     return [true, 'заглушка (реализация в плане; шаблонов нет)'];
                 case 'Installer':

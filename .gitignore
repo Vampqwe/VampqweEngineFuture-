@@ -1,1 +1,2 @@
-storage/cache/
+.env.test.tmp
+storage/cache/templates/

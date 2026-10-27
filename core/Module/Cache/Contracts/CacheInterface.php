@@ -24,6 +24,12 @@ interface CacheInterface
     /** Полностью очистить кэш. */
     public function flush(): bool;
 
+    /** Атомарно увеличить значение-целое на $by (false — если ключа нет). */
+    public function inc(string $key, int $by = 1): int|false;
+
+    /** Атомарно уменьшить значение-целое на $by (false — если ключа нет). */
+    public function dec(string $key, int $by = 1): int|false;
+
     /** Получить или вычислить и закешировать (callback-мемоизация). */
     public function remember(string $key, int $ttl, callable $callback): mixed;
 }
