@@ -33,32 +33,95 @@ final class SqlFileRunner
         $executed = [];
 
         foreach ($this->statements($sql) as $statement) {
-            if ($driver !== 'mysql') {
-                if ($this->isMysqlOnly($statement)) {
-                    continue; // SET/START TRANSACTION/COMMIT/USE — не для этой СУБД
+            if ($driver === 'mysql') {
+                try {
+                    $pdo->exec($statement);
+                } catch (\PDOException $e) {
+                    throw new RuntimeException(
+                        'Модуль [Database]: ошибка выполнения оператора из SQL-дампа: '
+                        . $e->getMessage() . PHP_EOL
+                        . 'Оператор: ' . mb_substr($statement, 0, 200),
+                        (int) $e->getCode(),
+                        $e
+                    );
                 }
-                if (preg_match('/^\s*ALTER\s+TABLE/i', $statement)) {
-                    continue; // ALTER-«хвосты» дампа (MODIFY AUTO_INCREMENT) — CREATE уже перенесён
-                }
-                $statement = $this->portToSqlite($statement);
+                $executed[] = $statement;
+                continue;
             }
 
-            try {
-                $pdo->exec($statement);
-            } catch (\PDOException $e) {
-                throw new RuntimeException(
-                    'Модуль [Database]: ошибка выполнения оператора из SQL-дампа: '
-                    . $e->getMessage() . PHP_EOL
-                    . 'Оператор: ' . mb_substr($statement, 0, 200),
-                    (int) $e->getCode(),
-                    $e
-                );
+            // --- не-mysql: портирование дампа phpMyAdmin (sqlite/pgsql) ---
+            if ($this->isMysqlOnly($statement)) {
+                continue; // SET/START TRANSACTION/COMMIT/USE — не для этой СУБД
             }
 
-            $executed[] = $statement;
+            if (preg_match('/^\s*ALTER\s+TABLE\b/i', $statement)) {
+                // Дампы phpMyAdmin выносят ключи в постфиксные ALTER ... ADD KEY.
+                // На sqlite их надо преобразовать в CREATE INDEX и прогнать ПОСЛЕ
+                // создания таблиц; PRIMARY KEY/AUTO_INCREMENT игнорируем (в дампе
+                // id без inline-PK -> INTEGER PRIMARY KEY AUTOINCREMENT по our-port).
+                foreach ($this->splitAlterKeys($statement) as $indexStatement) {
+                    $this->execute($pdo, $indexStatement, $executed);
+                }
+                continue;
+            }
+
+            $this->execute($pdo, $this->portToSqlite($statement), $executed);
         }
 
         return $executed;
+    }
+
+    /** @param list<string> $executed */
+    private function execute(PDO $pdo, string $statement, array &$executed): void
+    {
+        try {
+            $pdo->exec($statement);
+        } catch (\PDOException $e) {
+            throw new RuntimeException(
+                'Модуль [Database]: ошибка выполнения оператора из SQL-дампа: '
+                . $e->getMessage() . PHP_EOL
+                . 'Оператор: ' . mb_substr($statement, 0, 200),
+                (int) $e->getCode(),
+                $e
+            );
+        }
+        $executed[] = $statement;
+    }
+
+    /**
+     * Разбирает постфиксный ALTER дампа на безопасные операторы переноса:
+     *   ADD KEY / ADD UNIQUE KEY -> CREATE [UNIQUE] INDEX
+     *   ADD PRIMARY KEY         -> пропускается (PK задаётся при портировании CREATE TABLE)
+     *   MODIFY/CHANGE/DROP/ADD CONSTRAINT FK -> пропускаются (sqlite их не поддерживает
+     *   инлайн; ON DELETE через ALTER требует per-table rebuild — вне скоупа ядра v1).
+     *
+     * @return list<string>
+     */
+    private function splitAlterKeys(string $statement): array
+    {
+        if (!preg_match('/^\s*ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s*(.*)$/is', $statement, $m)) {
+            return [];
+        }
+        $table  = $m[1];
+        $clauses = preg_split('/,\s*\n\s*/', trim($m[2])) ?: [];
+        $out    = [];
+
+        foreach ($clauses as $clause) {
+            $clause = trim($clause);
+            if ($clause === '') {
+                continue;
+            }
+            if (preg_match('/^ADD\s+(UNIQUE\s+)?KEY\s+`?([A-Za-z0-9_]+)`?\s*\(([^)]*)\)/i', $clause, $c)) {
+                $unique = isset($c[1]) && $c[1] !== '' ? 'UNIQUE ' : '';
+                $cols   = str_replace('`', '', $c[3]);
+                // имя индекса уникально в масштабах БД sqlite -> префикс таблицы
+                $name   = $table . '_' . $c[2];
+                $out[]  = "CREATE {$unique}INDEX `{$name}` ON `{$table}` ({$cols})";
+            }
+            // ADD PRIMARY KEY / ADD CONSTRAINT / MODIFY / CHANGE — молча пропускаем
+        }
+
+        return $out;
     }
 
     /** MySQL-специфичные операторы, не имеющие смысла на других СУБД. */
@@ -88,24 +151,29 @@ final class SqlFileRunner
         // enum('a','b') -> TEXT (CHECK-ограничения sqlite из дампов не переносим — мягко)
         $out = preg_replace('/\benum\s*\([^)]*\)/i', 'TEXT', $out);
         $out = preg_replace('/\bset\s*\([^)]*\)/i', 'TEXT', $out);
-        $out = preg_replace('/\s+(ENGINE|COLLATE|AUTO_INCREMENT)\s*=?\s*[A-Za-z0-9_]*/i', '', $out);
+        // Типы: целочисленные MySQL -> INTEGER (с UNSIGNED и размерами).
+        // ВАЖНО: \b перед UNSIGNED невозможен после ')' — поэтому сначала срезаем
+        // размеры у int-типов, затем удаляем все UNSIGNED.
+        $out = preg_replace('/\b(TINY|SMALL|MEDIUM|BIG)?INT\(\d+\)(\s+UNSIGNED)?/i', 'INTEGER', $out);
+        $out = preg_replace('/\bBIGINT(\s+UNSIGNED)?/i', 'INTEGER', $out);
+        $out = preg_replace('/\bINT(\s+UNSIGNED)?(?!\w)/i', 'INTEGER', $out);
+        $out = preg_replace('/\s+UNSIGNED\b/i', '', $out);
+        // JSON в sqlite нет — обычный TEXT (валидация на уровне приложения).
+        $out = preg_replace('/\bjson\b/i', 'TEXT', $out);
+        // CHARACTER SET / COLLATE — везде (в определениях колонок и таблицы).
         $out = preg_replace('/\s+CHARACTER\s+SET\s+[A-Za-z0-9_]+/i', '', $out);
-        $out = preg_replace('/\s+COMMENT\s+\'(?:[^\']|\'\')*\'/i', '', $out);
-        $out = preg_replace('/\bINT(?:\(\d+\))?\s+UNSIGNED\s+NOT\s+NULL\s+AUTO_INCREMENT/i',
-            'INTEGER PRIMARY KEY AUTOINCREMENT', $out);
-        // Варианты порядка слов в дампах: NOT NULL ... AUTO_INCREMENT / просто AUTO_INCREMENT
-        $out = preg_replace('/\bBIGINT(?:\(\d+\))?(?:\s+UNSIGNED)?[^,]*AUTO_INCREMENT\b/i',
-            'INTEGER PRIMARY KEY AUTOINCREMENT', $out);
-        $out = preg_replace('/\bINT(?:\(\d+\))?(?:\s+UNSIGNED)?\s+[^,]*AUTO_INCREMENT\b/i',
-            'INTEGER PRIMARY KEY AUTOINCREMENT', $out);
-        $out = preg_replace('/\bBIGINT(\(\d+\))?\s+UNSIGNED\b/i', 'INTEGER', $out);
-        $out = preg_replace('/\bTINYINT(\(\d+\))?(\s+UNSIGNED)?/i', 'INTEGER', $out);
-        $out = preg_replace('/\bSMALLINT(\(\d+\))?(\s+UNSIGNED)?/i', 'INTEGER', $out);
-        $out = preg_replace('/\b(MEDIUM)?INT\(\d+\)/i', 'INTEGER', $out);
-        $out = preg_replace('/\s+UNSIGNED(?=\s|,|$)/i', '', $out);
+        $out = preg_replace('/\s+COLLATE\s+[A-Za-z0-9_]+/i', '', $out);
+        // COMMENT '...' — везде (колонки и таблица).
+        $out = preg_replace("/\s+COMMENT\s+'(?:[^'\\\\]|\\\\.)*'/i", '', $out);
+        // Хвост ") ENGINE=... DEFAULT CHARSET=...": оставляем только закрывающую скобку.
+        $out = preg_replace('/\)\s+ENGINE=\w+.*$/is', ')', $out);
+        $out = preg_replace('/\)\s+DEFAULT\s+CHARSET=\w+.*$/is', ')', $out);
+        // timestamp с дефолтом CURRENT_TIMESTAMP в sqlite требует DATETIME.
+        $out = preg_replace('/\btimestamp\b/i', 'DATETIME', $out);
         $out = preg_replace('/ON\s+UPDATE\s+CURRENT_TIMESTAMP(\(\d+\))?/i', '', $out);
-        // Каскадные удалённые CONSTRAINT KEY ... (уникальные индексы создаются дампом отдельно)
-        $out = preg_replace('/,\s*\n\s*(?=[,)])/', "\n", $out);
+        // Удалённые выше конструкции могли оставить «, ,» или хвостовую запятую перед ).
+        $out = preg_replace('/,\s*,+/', ',', $out);
+        $out = preg_replace('/,\s*\)/', "\n)", $out);
 
         return $out;
     }
