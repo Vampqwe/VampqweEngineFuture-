@@ -1,0 +1,73 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * CLI-точка входа движка: php bin/engine doctor
+ *
+ * Минимальная реализация самодиагностики: проверяет окружение,
+ * права на storage/, загрузку ядра и состояние приложения.
+ */
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Только для CLI\n");
+}
+
+define('BASE_PATH', dirname(__DIR__));
+
+require_once BASE_PATH . '/vendor/autoload.php';
+
+use App\Core\System\App;
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
+use App\Core\Module\Logger\Contracts\LoggerInterface;
+use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
+
+$command = $argv[1] ?? 'doctor';
+
+if ($command !== 'doctor') {
+    echo "Неизвестная команда: {$command}\nДоступные: doctor\n";
+    exit(1);
+}
+
+echo "🩺 VampqweEngineFuture — самодиагностика\n";
+echo str_repeat('-', 50) . "\n";
+
+$ok = true;
+
+function check(string $label, bool $pass, string $detail = ''): void
+{
+    global $ok;
+    $ok = $ok && $pass;
+    printf("%s %-28s %s\n", $pass ? '✅' : '❌', $label, $detail);
+}
+
+check('PHP >= 8.1', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION);
+check('autoload существует', is_file(BASE_PATH . '/vendor/autoload.php'));
+check('.env присутствует', is_file(BASE_PATH . '/.env'), '(иначе дефолты)');
+check('storage/ записи', is_writable(BASE_PATH . '/storage'));
+check('storage/logs/ записи', is_writable(BASE_PATH . '/storage/logs'));
+
+try {
+    $app = new App();
+
+    $ref  = new ReflectionClass($app);
+    $prop = $ref->getProperty('container');
+    $prop->setAccessible(true);
+    $c = $prop->getValue($app);
+
+    check('Config загружен', $c->get(ConfigRepositoryInterface::class)->has('app.name'));
+    check('FileSystem сервис', $c->has(FileSystemInterface::class));
+    check('Logger сервис', $c->has(LoggerInterface::class));
+    check('ExceptionHandler сервис', $c->has(ExceptionHandlerInterface::class));
+
+    $installed = file_exists(BASE_PATH . '/storage/.installed');
+    check('Состояние', true, $installed ? 'Running (установлен)' : 'NotInstalled');
+} catch (\Throwable $e) {
+    check('Инициализация ядра', false, $e->getMessage());
+}
+
+echo str_repeat('-', 50) . "\n";
+echo $ok ? "ВЕРДИКТ: всё в порядке 🎉\n" : "ВЕРДИКТ: есть проблемы 👆\n";
+exit($ok ? 0 : 1);

@@ -38,6 +38,36 @@ class ExceptionServiceProvider implements ModuleProviderInterface
     {
         set_exception_handler([$this, 'handleException']);
         set_error_handler([$this, 'handleError']);
+        // Фатальные ошибки (E_ERROR и т.п.) не бросают исключений —
+        // перехватываем их во время остановки скрипта (п.10 Конституции).
+        register_shutdown_function([$this, 'handleShutdown']);
+    }
+
+    public function handleShutdown(): void
+    {
+        $error = error_get_last();
+
+        if ($error === null || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            return;
+        }
+
+        $exception = new \ErrorException(
+            $error['message'],
+            0,
+            $error['type'],
+            $error['file'],
+            $error['line']
+        );
+
+        try {
+            $handler = $this->container !== null && $this->container->has(ExceptionHandlerInterface::class)
+                ? $this->container->get(ExceptionHandlerInterface::class)
+                : $this->createFallbackHandler();
+
+            $handler->report($exception);
+        } catch (\Throwable) {
+            error_log('Fatal during shutdown handling: ' . $error['message']);
+        }
     }
 
     public function handleException(\Throwable $exception): void
@@ -79,7 +109,10 @@ class ExceptionServiceProvider implements ModuleProviderInterface
 
     private function createFallbackHandler(): ExceptionHandlerInterface
     {
-        $logPath = (defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 4)) . '/storage/logs';
+        // Путь к логам берём из контейнера ('storage_path'), а не хардкодом dirname().
+        $logPath = ($this->container !== null && $this->container->has('storage_path'))
+            ? $this->container->get('storage_path') . '/logs'
+            : (defined('BASE_PATH') ? BASE_PATH : getcwd()) . '/storage/logs';
 
         $logger = new FallbackLogger($logPath);
 

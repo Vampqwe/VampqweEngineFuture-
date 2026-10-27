@@ -7,6 +7,8 @@ use App\Core\System\Container\Container;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Http\Kernel;
 use App\Core\System\Http\Request;
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\Config\Internal\Parsers\PhpArrayParser;
 use App\Core\System\Support\EnvLoader;
 use RuntimeException;
 
@@ -39,16 +41,33 @@ class App
     }
 
     /**
-     * Единственный источник истины о модулях — config/modules.php.
+     * Путь манифеста модулей из конфигурации (config/app.php => 'modules').
+     * Читается напрямую через PhpArrayParser: это бутстрап-чтение,
+     * полное хранилище конфигов ещё не собрано (разрыв цикличности
+     * App -> Config -> manifest -> App).
+     */
+    private function manifestPath(): string
+    {
+        $appConfig = (new PhpArrayParser())->parse(BASE_PATH . '/config/app.php');
+        $path = $appConfig['modules'] ?? 'config/modules.php';
+
+        return BASE_PATH . '/' . ltrim((string) $path, '/');
+    }
+
+    /**
+     * Единственный источник истины о модулях — манифест из конфигурации.
      * Порядок регистрации задаётся порядком в манифесте.
      */
     private function registerModuleProviders(): void
     {
-        $manifest = require BASE_PATH . '/config/modules.php';
+        $manifest = require $this->manifestPath();
 
         if (!is_array($manifest)) {
             throw new RuntimeException('Манифест модулей должен возвращать массив.');
         }
+
+        // Служебные ключи манифеста не являются модулями.
+        unset($manifest['path']);
 
         foreach ($manifest as $name => $module) {
             $providerClass = $module['provider'] ?? null;
@@ -75,7 +94,7 @@ class App
         // Часовой пояс и кодировка из конфигурации, а не из дефолтов PHP
         date_default_timezone_set(
             (string) $this->container
-                ->get(\App\Core\Module\Config\Contracts\ConfigRepositoryInterface::class)
+                ->get(ConfigRepositoryInterface::class)
                 ->get('app.timezone', 'UTC')
         );
 

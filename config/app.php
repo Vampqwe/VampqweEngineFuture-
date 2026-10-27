@@ -11,4 +11,6 @@ return [
     'locale' => $_ENV['APP_LOCALE'] ?? 'ru',
     'charset' => 'UTF-8',
     'log_level' => strtolower((string) ($_ENV['LOG_LEVEL'] ?? 'debug')),
+    // Путь манифеста модулей относительно корня проекта
+    'modules' => 'config/modules.php',
 ];

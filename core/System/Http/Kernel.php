@@ -24,18 +24,44 @@ class Kernel
             return $this->stateResponse($state);
         }
 
-        // Обычная маршрутизация пользовательских путей
-        $router = new Router();
-        $router->get('/', fn(Request $r): Response => $this->homeResponse());
-        $router->get('/system/health', fn(Request $r): Response => $this->healthResponse($r));
+        // Обычная маршрутизация: две «дороги» — системная и пользовательская.
+        // Системная дорога (/system/*, /admin/*, /api/system/*) — маршруты ядра.
+        $systemRouter = new Router();
+        $systemRouter->get('/system/health', fn(Request $r): Response => $this->healthResponse($r));
 
-        $handler = $router->match($request->method, $request->path);
+        $handler = $systemRouter->match($request->method, $request->path);
+
+        if ($handler === null && $this->isSystemPath($request->path)) {
+            return new Response('<h1>Ошибка: 404</h1><p>Системный маршрут не найден</p>', 404);
+        }
+
+        if ($handler !== null) {
+            return $handler($request);
+        }
+
+        // Пользовательская дорога (/, /blog/*, ...) со своими глобальными middleware.
+        $userRouter = new Router([
+            new \App\Core\System\Http\Middleware\MaintenanceMode(
+                $this->container->get('storage_path'),
+                $state
+            ),
+        ]);
+        $userRouter->get('/', fn(Request $r): Response => $this->homeResponse());
+
+        $handler = $userRouter->match($request->method, $request->path);
 
         if ($handler === null) {
             return new Response('<h1>Ошибка: 404</h1><p>Страница не найдена</p>', 404);
         }
 
         return $handler($request);
+    }
+
+    private function isSystemPath(string $path): bool
+    {
+        return str_starts_with($path, '/system/')
+            || str_starts_with($path, '/admin')
+            || str_starts_with($path, '/api/system');
     }
 
     private function isHealthCheck(Request $request): bool
