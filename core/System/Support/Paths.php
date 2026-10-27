@@ -31,6 +31,7 @@ final class Paths
         'cache'       => 'storage/cache',  // кэш движка
         'sessions'    => 'storage/sessions', // file-стор сессий (Session, driver=file)
         'database'    => 'database',       // SQL-дампы схемы движка (db.sql) — источник для Installer/миграций
+        'migrations'  => 'migrations',     // версии схемы БД (Migration): <ГГГГ_ММ_ДД_HHMMSS>_имя.php
     ];
 
     public function __construct(private readonly string $basePath)

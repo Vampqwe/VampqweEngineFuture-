@@ -11,6 +11,7 @@ use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\Module\Installer\Internal\InstallerView;
 use App\Core\Module\Installer\Internal\Steps\CreateEnvStep;
 use App\Core\Module\Logger\Contracts\LoggerInterface;
+use App\Core\Module\Migration\Contracts\MigratorInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
 use App\Core\System\Support\SuperAdmin;
 use Throwable;
@@ -42,6 +43,9 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         private readonly LoggerInterface $logger,
         private readonly ?DatabaseInterface $db = null,
         private readonly string $databasePath = '',
+        // Migration — опциональная зависимость: после развёртки db.sql автоматически
+        // применяются ожидающие версии схемы (migrations/ <- Paths).
+        private readonly ?MigratorInterface $migrator = null,
     ) {
     }
 
@@ -347,7 +351,14 @@ final class Installer implements InstallerInterface, InstallerPageInterface
                 'channel' => 'Installer',
             ]);
 
-            return "развёрнута ({$statements} операторов из db.sql)";
+            // Автоприменение версий схемы (модуль Migration) сразу после дампа —
+            // деградирует тихо, если миграций/БД нет (migratePending не бросает).
+            $appliedMigrations = $this->migrator?->migratePending() ?? [];
+            $migrationNote = $appliedMigrations === []
+                ? ''
+                : ', применено миграций: ' . count($appliedMigrations);
+
+            return "развёрнута ({$statements} операторов из db.sql{$migrationNote})";
         } catch (Throwable $e) {
             $this->logger->error('Schema-шаг установки не выполнен: ' . $e->getMessage(), [
                 'channel' => 'Installer',
