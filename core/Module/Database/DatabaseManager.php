@@ -111,15 +111,10 @@ final class DatabaseManager implements DatabaseInterface
             throw new RuntimeException("Модуль [Database]: недопустимое имя таблицы '{$table}'.");
         }
 
-        // Для sqlite: если файл БД пуст (0 байт) — таблиц заведомо нет.
-        // Иначе PDO создаёт in-memory соединение и даёт ложные результаты.
-        if ($this->driver() === 'sqlite') {
-            $file = $this->sqliteFile();
-            if ($file !== null && is_file($file) && filesize($file) === 0) {
-                return false;
-            }
-        }
-
+        // Примечание: раньше здесь был ранний выход «файл 0 байт → таблиц нет».
+        // Он устарел: SQLite при первом же запросе сам инициализирует пустой
+        // файл, а резолв пути ниже теперь симметричен PdoConnector (единый
+        // storage_path), поэтому честная проверка через sqlite_master надёжна.
         return match ($this->driver()) {
             'mysql'  => (bool) $this->selectOne(
                 'SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
@@ -156,13 +151,16 @@ final class DatabaseManager implements DatabaseInterface
             return null;
         }
 
-        // Относительные пути резолвим тем же способом, что и PdoConnector:
-        // от корня проекта (в конфигурации это 'storage/database.sqlite').
-        // Прежняя логика («относительный = внутри storage/») ломала симметрию:
-        // PDO открывал один файл, а tableExists смотрел filesize другого —
-        // реестр миграций ложно считался несозданным.
+        // Единая точка резолва относительного пути: ровно так же, как в
+        // PdoConnector::dsnSqlite() — через storage_path из контейнера (п.7).
+        // Прежняя логика (резолв от BASE_PATH) ломала симметрию: PDO открывал
+        // один файл, а tableExists/sizes смотрели в другой — реестр миграций
+        // ложно считался несозданным/несуществующим.
         if (!str_starts_with($path, '/')) {
-            $path = rtrim(BASE_PATH, '/') . '/' . $path;
+            $storagePath = $this->container->has('storage_path')
+                ? (string) $this->container->get('storage_path')
+                : BASE_PATH . '/storage';
+            $path = rtrim($storagePath, '/') . '/' . $path;
         }
 
         return $path;
