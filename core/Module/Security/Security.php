@@ -21,12 +21,13 @@ final class Security implements SecurityInterface
 
     public function hashPassword(string $password): string
     {
-        throw new RuntimeException('Модуль [Security] объявлен в ядре, но ещё не реализован.');
+        // argon2id — актуальный recommended алгоритм (PHP >= 7.3).
+        return password_hash($password, PASSWORD_ARGON2ID);
     }
 
     public function verifyPassword(string $password, string $hash): bool
     {
-        throw new RuntimeException('Модуль [Security] ещё не реализован.');
+        return $hash !== '' && password_verify($password, $hash);
     }
 
     public function generateCsrfToken(): string

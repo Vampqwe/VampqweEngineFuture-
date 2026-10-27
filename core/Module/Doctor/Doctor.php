@@ -111,7 +111,11 @@ final class Doctor implements DoctorInterface
                     $v = $instance->get(['a' => ['b' => 1]], 'a.b');
                     return [$v === 1, 'работает (точечная нотация)'];
                 case 'Security':
-                    return [strlen($instance->randomToken(8)) === 16, 'частично (токены работают, crypto в плане)'];
+                    $tok  = strlen($instance->randomToken(8)) === 16;
+                    $hash = $instance->hashPassword('doctor-probe-123');
+                    $pwd  = $instance->verifyPassword('doctor-probe-123', $hash)
+                        && !$instance->verifyPassword('wrong', $hash);
+                    return [$tok && $pwd, 'работает (токены + argon2id пароли; csrf/encrypt в плане)'];
                 case 'Database':
                     return [true, 'заглушка (реализация в плане; ping=false)'];
                 case 'Cache':

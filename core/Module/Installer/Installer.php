@@ -11,6 +11,7 @@ use App\Core\Module\Installer\Internal\InstallerView;
 use App\Core\Module\Installer\Internal\Steps\CreateEnvStep;
 use App\Core\Module\Logger\Contracts\LoggerInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
+use App\Core\System\Support\SuperAdmin;
 use Throwable;
 
 /**
@@ -62,6 +63,16 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         try {
             // app.key генерируется один раз; существующий .env не перетираем
             $key = $this->currentAppKey() ?? 'base64:' . $this->security->randomToken(32);
+
+            // Супер-администратор зашит в ядро (Support\SuperAdmin): логин фиксирован,
+            // Installer хранит только argon2id-хеш его пароля в .env. Пароль/хеш в логи не пишутся.
+            $password = (string) ($options['super_admin_password'] ?? '');
+            if (strlen($password) < 8) {
+                throw new \InvalidArgumentException('Пароль супер-администратора слишком короткий (мин. 8 символов).');
+            }
+            $adminHash = $this->security->hashPassword($password);
+            unset($password);
+
             (new CreateEnvStep($this->fs))->handle($this->basePath . '/.env', [
                 'APP_NAME'     => $this->sanitizeName((string) ($options['app_name'] ?? 'VampqweEngineFuture')),
                 'APP_ENV'      => (bool) ($options['debug'] ?? false) ? 'local' : 'production',
@@ -69,6 +80,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
                 'APP_KEY'      => $key,
                 'APP_TIMEZONE' => $this->sanitizeTimezone((string) ($options['timezone'] ?? 'UTC')),
                 'LOG_LEVEL'    => 'debug',
+                SuperAdmin::PASSWORD_HASH_ENV => $adminHash,
             ]);
 
             // Флаг готовности — AppState::Running определяется по нему
@@ -138,11 +150,15 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
         $name = InstallerView::esc((string) $this->config->get('app.name', 'VampqweEngineFuture'));
 
+        // Поле пароля супер-администратора — имя НЕ выводится в HTML:
+        // логин зашит в ядро (Support\SuperAdmin), пользователю нужен только пароль.
         $body = $errBox
               . '<div class="sub">Шаг 2 из 3. Настройки можно поменять позже в <code>.env</code>.</div>'
               . '<form method="post" action="/install/run">'
               . '<label>Название сайта</label>'
               . '<input name="app_name" value="' . $name . '" maxlength="64" required>'
+              . '<label>Пароль супер-администратора <small>(единственный управленец движка, логин зашит в ядро)</small></label>'
+              . '<input type="password" name="super_admin_password" minlength="8" autocomplete="new-password" required>'
               . '<label>Часовой пояс</label>'
               . '<select name="timezone">' . $tzOptions . '</select>'
               . '<label style="display:flex;gap:8px;align-items:center;margin-top:14px">'
@@ -203,6 +219,11 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         }
         if (!in_array((string) ($post['timezone'] ?? ''), \DateTimeZone::listIdentifiers(), true)) {
             $errors[] = 'Недопустимый часовой пояс.';
+        }
+        // Пароль супер-администратора обязателен с первого запуска (ядро, Support\SuperAdmin).
+        $pass = (string) ($post['super_admin_password'] ?? '');
+        if (strlen($pass) < 8 || strlen($pass) > 200) {
+            $errors[] = 'Пароль супер-администратора: от 8 до 200 символов.';
         }
 
         return $errors;
