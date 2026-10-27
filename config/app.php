@@ -2,7 +2,9 @@
 declare(strict_types=1);
 
 return [
-    'name' => 'VampqweEngineFuture',
+    // Имя приложения: единый источник — APP_NAME из .env (его пишет Installer).
+    // Хардкод ниже — только fallback до установки/без .env.
+    'name' => (string) ($_ENV['APP_NAME'] ?? 'VampqweEngineFuture'),
     'version' => '0.1.0',
     // (bool) 'false' === true в PHP! Поэтому сравниваем строку явно.
     // Безопасный дефолт: если APP_DEBUG не задан — debug ВЫКЛЮЧЕН.

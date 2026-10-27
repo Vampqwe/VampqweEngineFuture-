@@ -137,9 +137,10 @@ class Kernel
             }
 
             $ok = $installer->install([
-                'app_name' => (string) ($request->post['app_name'] ?? ''),
-                'timezone' => (string) ($request->post['timezone'] ?? 'UTC'),
-                'debug'    => isset($request->post['debug']),
+                'app_name'             => (string) ($request->post['app_name'] ?? ''),
+                'timezone'             => (string) ($request->post['timezone'] ?? 'UTC'),
+                'debug'                => isset($request->post['debug']),
+                'super_admin_password' => (string) ($request->post['super_admin_password'] ?? ''),
             ]);
 
             if (!$ok) {
@@ -147,10 +148,11 @@ class Kernel
             }
 
             return new Response($pages->successPage([
-                'Название сайта' => (string) ($request->post['app_name'] ?? 'VampqweEngineFuture'),
-                'Часовой пояс'   => (string) ($request->post['timezone'] ?? 'UTC'),
-                'Режим отладки'  => isset($request->post['debug']),
-                '.env создан'    => is_file((string) $this->container->get('base_path') . '/.env'),
+                'Название сайта'           => (string) ($request->post['app_name'] ?? 'VampqweEngineFuture'),
+                'Часовой пояс'             => (string) ($request->post['timezone'] ?? 'UTC'),
+                'Режим отладки'            => isset($request->post['debug']),
+                'Супер-администратор'      => \App\Core\System\Support\SuperAdmin::USERNAME . ' (пароль задан, хеш — в .env)',
+                '.env создан'              => is_file((string) $this->container->get('base_path') . '/.env'),
             ]), 201);
         }
 
