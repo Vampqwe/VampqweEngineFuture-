@@ -200,6 +200,17 @@ final class Doctor implements DoctorInterface
                     }
                     $coreTpl = $instance->exists('layouts/base', \App\Core\Module\Template\Contracts\TemplateInterface::SCOPE_CORE);
                     return [true, 'работает (рендер+экранирование OK, layout ядра: ' . ($coreTpl ? 'есть' : 'нет') . ')'];
+                case 'Theme':
+                    /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $instance */
+                    $themes   = $instance->available();
+                    $current  = $instance->current();
+                    $hasDef   = in_array(\App\Core\Module\Theme\Theme::DEFAULT_THEME, $themes, true);
+                    $sites    = count($instance->sites());
+                    if (!$hasDef || !in_array($current, $themes, true)) {
+                        return [false, "НЕЗДОРОВ: тема по умолчанию '_default' или текущая '{$current}' не найдена в view/app/"];
+                    }
+                    return [true, 'работает (тем: ' . count($themes)
+                        . '[' . implode(',', $themes) . '], сайтов в реестре: ' . $sites . ')'];
                 case 'Installer':
                     // Реальная проба: requirements() обязан вернуть полные проверки.
                     $req = $instance->requirements();

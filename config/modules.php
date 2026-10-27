@@ -101,6 +101,10 @@ return [
         'provider' => \App\Core\Module\Template\Providers\TemplateServiceProvider::class,
         'critical' => false,
     ],
+    'Theme' => [
+        'provider' => \App\Core\Module\Theme\Providers\ThemeServiceProvider::class,
+        'critical' => false,
+    ],
     'Queue' => [
         'provider' => \App\Core\Module\Queue\Providers\QueueServiceProvider::class,
         'critical' => false,

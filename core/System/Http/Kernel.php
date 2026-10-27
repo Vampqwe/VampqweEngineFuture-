@@ -301,9 +301,17 @@ class Kernel
         }
         $status = $dbOk ? 200 : 503;
 
-        // Мультисайт: тема сайта по домену запроса. Пока маппинг простейший
-        // (домен содержит имя темы); полноценный реестр сайтов в БД — следующий шаг.
-        $theme = $this->resolveThemeByHost($request->header('host') ?? '');
+        // Мультисайт: тема сайта по домену запроса — через модуль Theme
+        // (реестр engine_sites -> эвристика поддомена -> дефолт из конфига).
+        $theme = '';
+        if ($this->container->has(\App\Core\Module\Theme\Contracts\ThemeInterface::class)) {
+            /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+            $themes = $this->container->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+            $theme  = $themes->resolveForRequest($request->header('host') ?? '');
+        } elseif ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
+            // Fallback без Theme-модуля: прежняя эвристика поддомена.
+            $theme = $this->resolveThemeByHost($request->header('host') ?? '');
+        }
 
         // Рендер через модуль Template (view/app/<theme>/home.phtml).
         if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
