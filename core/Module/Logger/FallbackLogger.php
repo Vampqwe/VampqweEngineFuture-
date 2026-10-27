@@ -9,15 +9,15 @@ use App\Core\Module\Logger\Contracts\LoggerInterface;
  * Простейший logger «последней надежды», используемый когда основной
  * Logger ещё не доступен (падение при бутстрапе). Пишет напрямую через
  * file_put_contents, без зависимостей от FileSystem-модуля.
+ *
+ * Layout совпадает с основным Logger'ом: logs/<Y-m-d>/<канал>.log —
+ * чтобы fallback-записи не оседали отдельными файлами в корне логов.
  */
 class FallbackLogger implements LoggerInterface
 {
     public function __construct(
         private readonly string $logPath
     ) {
-        if (!is_dir($this->logPath)) {
-            @mkdir($this->logPath, 0755, true);
-        }
     }
 
     public function emergency(string $message, array $context = []): void
@@ -75,9 +75,20 @@ class FallbackLogger implements LoggerInterface
             }
         }
 
-        $logFile = $this->logPath . '/' . date('Y-m-d') . '.log';
-        $entry   = sprintf("[%s] %s: %s%s\n", date('Y-m-d H:i:s'), $level, $message, $suffix);
+        // Тот же layout, что у основного Logger: logs/<дата>/<канал>.log.
+        $channel = isset($context['channel']) ? (string) $context['channel'] : 'Exception';
+        $channel = substr(preg_replace('/[^A-Za-z0-9_-]/', '_', $channel) ?? 'Exception', 0, 64);
+        if ($channel === '') {
+            $channel = 'Exception';
+        }
 
+        $dir     = rtrim($this->logPath, '/') . '/' . date('Y-m-d');
+        $logFile = $dir . '/' . $channel . '.log';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+
+        $entry = sprintf("[%s] %s: %s%s\n", date('Y-m-d H:i:s'), $level, $message, $suffix);
         @file_put_contents($logFile, $entry, FILE_APPEND);
     }
 }
