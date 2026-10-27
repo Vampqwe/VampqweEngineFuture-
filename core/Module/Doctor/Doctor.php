@@ -124,7 +124,13 @@ final class Doctor implements DoctorInterface
                         && !$instance->verifyPassword('wrong', $hash);
                     return [$tok && $pwd, 'работает (токены + argon2id пароли; csrf/encrypt в плане)'];
                 case 'Database':
-                    return [true, 'заглушка (реализация в плане; ping=false)'];
+                    /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $instance */
+                    $driver = $instance->driver();
+                    if ($instance->ping()) {
+                        return [true, "работает (PDO, драйвер: {$driver})"];
+                    }
+                    // Движок жив, но СУБД недоступна — это предупреждение, не «OK».
+                    return [false, "драйвер '{$driver}': соединение недоступно (проверьте .env / запуск СУБД)"];
                 case 'Cache':
                     return [true, 'заглушка (реализация в плане; remember деградирует безопасно)'];
                 case 'Queue':
