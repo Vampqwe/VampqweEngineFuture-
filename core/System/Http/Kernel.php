@@ -287,11 +287,29 @@ class Kernel
         }
 
         $debugLabel = $debug ? 'ON' : 'OFF';
+        $body       = "✅ <b>{$appName}</b> (Debug: {$debugLabel}) успешно запущен!";
+        $status     = 200;
 
-        return new Response(
-            "✅ <b>{$appName}</b> (Debug: {$debugLabel}) успешно запущен!",
-            200
-        );
+        // Честность фундамента: если активирован драйвер Database, а соединения
+        // нет — главная НЕ должна рапортовать «успешно запущен». Иначе при
+        // отключённой СУБД движок врёт о своём состоянии.
+        if ($this->container->has(\App\Core\Module\Database\Contracts\DatabaseInterface::class)) {
+            /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $db */
+            $db  = $this->container->get(\App\Core\Module\Database\Contracts\DatabaseInterface::class);
+            $err = $db->connectionError();
+
+            if ($err !== null) {
+                $driver = htmlspecialchars($db->driver(), ENT_QUOTES);
+                $note   = $debug
+                    ? '<br><span style="color:#b00">' . htmlspecialchars($err, ENT_QUOTES) . '</span>'
+                    : '';
+                $body = "⚠️ <b>{$appName}</b>: ядро работает, но база данных «{$driver}» недоступна."
+                    . ' Проверьте запуск СУБД и настройки в .env.' . $note;
+                $status = 503;
+            }
+        }
+
+        return new Response($body, $status);
     }
 
     private function healthResponse(Request $request): Response
@@ -310,12 +328,23 @@ class Kernel
         if ($this->container->has(\App\Core\Module\Database\Contracts\DatabaseInterface::class)) {
             /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $db */
             $db = $this->container->get(\App\Core\Module\Database\Contracts\DatabaseInterface::class);
-            $payload['database'] = ['driver' => $db->driver(), 'connected' => $db->ping()];
+            $connected = $db->ping();
+            $payload['database'] = ['driver' => $db->driver(), 'connected' => $connected];
+
+            // Если БД заявлена активным драйвером и недоступна — health не «ok»:
+            // статус degraded + HTTP 503 (принцип честности фундамента).
+            if (!$connected) {
+                $payload['status'] = 'degraded';
+                if ($debug = $this->container->has(ConfigRepositoryInterface::class)
+                    && (bool) $this->container->get(ConfigRepositoryInterface::class)->get('app.debug', false)) {
+                    $payload['database']['error'] = $db->connectionError();
+                }
+            }
         }
 
         return new Response(
             json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: '{}',
-            200,
+            ($payload['status'] ?? 'ok') === 'ok' ? 200 : 503,
             ['Content-Type' => 'application/json; charset=utf-8']
         );
     }

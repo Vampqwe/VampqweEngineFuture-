@@ -138,10 +138,19 @@ final class DatabaseManager implements DatabaseInterface
 
     public function ping(): bool
     {
+        return $this->connectionError() === null;
+    }
+
+    public function connectionError(): ?string
+    {
         try {
-            return $this->pdo()->query('SELECT 1')->fetchColumn() !== false;
-        } catch (Throwable) {
-            return false;
+            $this->pdo()->query('SELECT 1')->fetchColumn();
+
+            return null;
+        } catch (Throwable $e) {
+            // Без утечек: текст исключения PDO может содержать host/port —
+            // наружу отдаём только в debug (Kernel решает сам).
+            return $e->getMessage();
         }
     }
 
