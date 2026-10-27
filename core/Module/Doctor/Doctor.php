@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Core\Module\Doctor;
 
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\Doctor\Checks\ModulePresenceCheck;
 use App\Core\Module\Doctor\Contracts\DoctorInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 
@@ -41,8 +43,8 @@ final class Doctor implements DoctorInterface
     {
         $results = [];
 
-        // Единая точка правды о путях: каждый ключ Paths обязан быть
-        // зарегистрирован в контейнере как <ключ>_path — иначе рассинхрон.
+        // 1) Пути: единая точка правды Paths::MAP обязана быть зарегистрирована
+        // в контейнере как <ключ>_path — иначе рассинхрон (п.7 Конституции).
         foreach (\App\Core\System\Support\Paths::keys() as $key) {
             $registered = $this->container->has($key . '_path');
             $results[] = [
@@ -53,15 +55,79 @@ final class Doctor implements DoctorInterface
                     : 'путь не зарегистрирован в контейнере (рассинхрон с Paths::MAP)',
             ];
         }
+
+        // 2) Модули: контракт зарегистрирован И реализуем (иначе Doctor даёт ложное «OK»).
         foreach ($this->services as $name => $contract) {
-            $ok = $this->container->has($contract);
-            $results[] = [
-                'name'    => $name,
-                'ok'      => $ok,
-                'message' => $ok ? 'модуль зарегистрирован' : 'модуль отсутствует',
-            ];
+            if (!$this->container->has($contract)) {
+                $results[] = ['name' => $name, 'ok' => false, 'message' => 'модуль отсутствует'];
+                continue;
+            }
+
+            try {
+                $instance = $this->container->get($contract);
+            } catch (\Throwable $e) {
+                $results[] = ['name' => $name, 'ok' => false, 'message' => 'не резолвится: ' . $e->getMessage()];
+                continue;
+            }
+
+            $probe = $this->probe($name, $instance);
+            $results[] = ['name' => $name, 'ok' => $probe[0], 'message' => $probe[1]];
         }
+
+        // 3) Сверка манифеста и контейнера (внутренняя проверка Doctor).
+        if ($this->container->has(ConfigRepositoryInterface::class)) {
+            $manifest = $this->container->get(ConfigRepositoryInterface::class)->all('modules');
+            if ($manifest !== []) {
+                $results = array_merge(
+                    $results,
+                    ModulePresenceCheck::run($this->container, $manifest, $this->services)
+                );
+            }
+        }
+
         return $results;
+    }
+
+    /**
+     * Проба «здоровья»: реально ли модуль работает или это заглушка «в плане».
+     * Возвращает [ok, сообщение]. Заглушки считаются НЕ критической проблемой (ok=true),
+     * но честно помечаются как план — движок на них не падает.
+     *
+     * @param object $instance
+     * @return array{0:bool,1:string}
+     */
+    private function probe(string $name, object $instance): array
+    {
+        // stateless-пробы по контракту
+        try {
+            switch ($name) {
+                case 'Parser':
+                    /** @var \App\Core\Module\Parser\Contracts\ParserInterface $instance */
+                    $json = $instance->encode(['ok' => true], 'json');
+                    return [$instance->parse($json, 'json') === ['ok' => true], 'работает (json roundtrip)'];
+                case 'TimeDate':
+                    return [$instance->now() instanceof \DateTimeImmutable, 'работает (tz: ' . $instance->timezone() . ')'];
+                case 'ArrayHelper':
+                    $v = $instance->get(['a' => ['b' => 1]], 'a.b');
+                    return [$v === 1, 'работает (точечная нотация)'];
+                case 'Security':
+                    return [strlen($instance->randomToken(8)) === 16, 'частично (токены работают, crypto в плане)'];
+                case 'Database':
+                    return [true, 'заглушка (реализация в плане; ping=false)'];
+                case 'Cache':
+                    return [true, 'заглушка (реализация в плане; remember деградирует безопасно)'];
+                case 'Queue':
+                    return [true, 'заглушка (реализация в плане; size=0)'];
+                case 'Template':
+                    return [true, 'заглушка (реализация в плане; шаблонов нет)'];
+                case 'Installer':
+                    return [true, 'заглушка (requirements() работает, install() в плане)'];
+                default:
+                    return [true, 'модуль зарегистрирован и резолвится'];
+            }
+        } catch (\Throwable $e) {
+            return [false, 'НЕЗДОРОВ: ' . $e->getMessage()];
+        }
     }
 
     public function isHealthy(): bool
