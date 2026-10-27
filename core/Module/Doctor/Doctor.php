@@ -32,6 +32,7 @@ final class Doctor implements DoctorInterface
             'Template'    => \App\Core\Module\Template\Contracts\TemplateInterface::class,
             'Error'       => \App\Core\Module\Error\Contracts\ErrorPageInterface::class,
             'Installer'   => \App\Core\Module\Installer\Contracts\InstallerInterface::class,
+            'ArrayHelper' => \App\Core\Module\ArrayHelper\Contracts\ArrayHelperInterface::class,
         ],
     ) {
     }
@@ -39,6 +40,19 @@ final class Doctor implements DoctorInterface
     public function check(): array
     {
         $results = [];
+
+        // Единая точка правды о путях: каждый ключ Paths обязан быть
+        // зарегистрирован в контейнере как <ключ>_path — иначе рассинхрон.
+        foreach (\App\Core\System\Support\Paths::keys() as $key) {
+            $registered = $this->container->has($key . '_path');
+            $results[] = [
+                'name'    => 'Путь:' . $key,
+                'ok'      => $registered,
+                'message' => $registered
+                    ? (string) $this->container->get($key . '_path')
+                    : 'путь не зарегистрирован в контейнере (рассинхрон с Paths::MAP)',
+            ];
+        }
         foreach ($this->services as $name => $contract) {
             $ok = $this->container->has($contract);
             $results[] = [

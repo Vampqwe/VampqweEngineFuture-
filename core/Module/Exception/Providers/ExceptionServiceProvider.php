@@ -109,10 +109,11 @@ class ExceptionServiceProvider implements ModuleProviderInterface
 
     private function createFallbackHandler(): ExceptionHandlerInterface
     {
-        // Путь к логам берём из контейнера ('storage_path'), а не хардкодом dirname().
-        $logPath = ($this->container !== null && $this->container->has('storage_path'))
-            ? $this->container->get('storage_path') . '/logs'
-            : (defined('BASE_PATH') ? BASE_PATH : getcwd()) . '/storage/logs';
+        // Путь к логам берём из контейнера ('logs_path' — единая точка правды Paths),
+        // а не хардкодом dirname()/BASE_PATH.
+        $logPath = ($this->container !== null && $this->container->has('logs_path'))
+            ? (string) $this->container->get('logs_path')
+            : sys_get_temp_dir() . '/vampqwe-logs';
 
         $logger = new FallbackLogger($logPath);
 

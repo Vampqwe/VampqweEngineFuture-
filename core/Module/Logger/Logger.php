@@ -7,6 +7,11 @@ use App\Core\Module\Logger\Contracts\LoggerInterface;
 use App\Core\Module\Logger\Enums\LogLevel;
 use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
 
+/**
+ * Логгер с каналами: КАЖДЫЙ модуль пишет в свой файл
+ * logs/<Y-m-d>/<канал>.log (единая точка путей — ключ контейнера 'logs_path').
+ * Канал берётся из context['channel'] (по умолчанию 'app').
+ */
 class Logger implements LoggerInterface
 {
     private string $logPath;
@@ -19,11 +24,6 @@ class Logger implements LoggerInterface
     ) {
         $this->logPath = rtrim($logPath, '/');
         $this->minLevel = $minLevel;
-        
-        // Создаём папку логов, если её нет
-        if (!$this->fileSystem->exists($this->logPath)) {
-            $this->fileSystem->createDirectory($this->logPath);
-        }
     }
 
     public function emergency(string $message, array $context = []): void
@@ -68,17 +68,43 @@ class Logger implements LoggerInterface
 
     public function log(string $level, string $message, array $context = []): void
     {
-        // Проверяем минимальный уровень
         if (!$this->shouldLog($level)) {
             return;
         }
 
-        // Форматируем сообщение
         $formatted = $this->formatMessage($level, $message, $context);
-        
-        // Записываем в файл
-        $logFile = $this->logPath . '/' . date('Y-m-d') . '.log';
+
+        // Файл канала создаём лениво — папка не трогаем на старте.
+        $logFile = $this->channelFile($this->channel($context));
+        $dir = dirname($logFile);
+        if (!$this->fileSystem->exists($dir)) {
+            $this->fileSystem->createDirectory($dir);
+        }
         $this->fileSystem->append($logFile, $formatted . PHP_EOL);
+    }
+
+    /** Путь файла лога конкретного канала (для диагностики/Doctor). */
+    public function channelFile(string $channel, ?string $date = null): string
+    {
+        $date ??= date('Y-m-d');
+
+        return $this->logPath . '/' . $date . '/' . $this->sanitizeChannel($channel) . '.log';
+    }
+
+    private function channel(array $context): string
+    {
+        $raw = isset($context['channel']) ? (string) $context['channel'] : 'app';
+
+        return $this->sanitizeChannel($raw);
+    }
+
+    /** Имя канала -> безопасное имя файла: letters/digits/dash/underscore, не длиннее 64. */
+    private function sanitizeChannel(string $channel): string
+    {
+        $clean = preg_replace('/[^A-Za-z0-9_-]/', '_', $channel) ?? 'app';
+        $clean = substr(trim($clean, '_'), 0, 64);
+
+        return $clean === '' ? 'app' : $clean;
     }
 
     private function shouldLog(string $level): bool
@@ -101,12 +127,18 @@ class Logger implements LoggerInterface
     {
         $timestamp = date('Y-m-d H:i:s');
         $levelUpper = strtoupper($level);
-        
-        // Заменяем плейсхолдеры {key} на значения из контекста
+
         foreach ($context as $key => $value) {
-            $message = str_replace('{' . $key . '}', (string) $value, $message);
+            if (is_scalar($value)) {
+                $message = str_replace('{' . $key . '}', (string) $value, $message);
+            }
         }
 
-        return "[{$timestamp}] {$levelUpper}: {$message}";
+        // В строку пишем канал и остаток контекста (кроме channel), чтобы файл был читаемым.
+        $meta = $context;
+        unset($meta['channel']);
+        $suffix = $meta === [] ? '' : ' ' . json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return "[{$timestamp}] {$levelUpper}: {$message}{$suffix}";
     }
 }

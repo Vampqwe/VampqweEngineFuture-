@@ -24,7 +24,7 @@ class LoggerServiceProvider implements ModuleProviderInterface
 
             return new Logger(
                 $c->get(FileSystemInterface::class),
-                $c->get('storage_path') . '/logs',
+                $c->get('logs_path'),
                 $minLevel
             );
         });

@@ -46,8 +46,14 @@ function check(string $label, bool $pass, string $detail = ''): void
 check('PHP >= 8.1', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION);
 check('autoload существует', is_file(BASE_PATH . '/vendor/autoload.php'));
 check('.env присутствует', is_file(BASE_PATH . '/.env'), '(иначе дефолты)');
-check('storage/ записи', is_writable(BASE_PATH . '/storage'));
-check('storage/logs/ записи', is_writable(BASE_PATH . '/storage/logs'));
+// Пути проверяем НЕ хардкодом, а через единую точку правды — Support\Paths.
+$paths = new \App\Core\System\Support\Paths(BASE_PATH);
+foreach ($paths->all() as $key => $abs) {
+    if (in_array($key, ['storage', 'logs'], true)) {
+        @mkdir($abs, 0755, true);
+        check($key . '/ записи', is_writable($abs), $abs);
+    }
+}
 
 try {
     $app = new App();
