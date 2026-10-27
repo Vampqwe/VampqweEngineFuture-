@@ -7,6 +7,7 @@ use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Error\Contracts\ErrorPageInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
+use App\Core\Module\Session\Contracts\SessionInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Enums\AppState;
 use App\Core\System\Support\Router;
@@ -21,6 +22,18 @@ class Kernel
     {
         $state = $this->detectAppState();
 
+        // Session: ленивое жизненное пространство запроса. Резолвим только когда
+        // модуль доступен (до установки его нет — и это нормально).
+        $session = $this->container->has(SessionInterface::class)
+            ? $this->container->get(SessionInterface::class)
+            : null;
+
+        if ($session !== null) {
+            // Однократная фоновая миграция file<->redis при СМЕНЕ session.driver:
+            // оставшиеся записи старого стора переносятся в новый без потери сессий.
+            $this->migrateSessionStoreOnce($session);
+        }
+
         // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
         // до установки это единственный способ довести движок до Running.
         if ($this->isInstallerPath($request->path)) {
@@ -30,40 +43,109 @@ class Kernel
         // Для состояний вне Running отдаём служебные страницы,
         // игнорируя маршрутизацию (кроме /system/health — он доступен всегда).
         if ($state !== AppState::Running && !$this->isHealthCheck($request)) {
-            return $this->stateResponse($state);
+            return $this->finish($this->stateResponse($state), $session);
         }
 
         // Обычная маршрутизация: две «дороги» — системная и пользовательская.
         // Системная дорога (/system/*, /admin/*, /api/system/*) — маршруты ядра.
-        $systemRouter = new Router();
+        $systemRouter = new Router($this->globalMiddleware($request));
         $systemRouter->get('/system/health', fn(Request $r): Response => $this->healthResponse($r));
 
         $handler = $systemRouter->match($request->method, $request->path);
 
         if ($handler === null && $this->isSystemPath($request->path)) {
-            return $this->errorPage(404);
+            return $this->finish($this->errorPage(404), $session);
         }
 
         if ($handler !== null) {
-            return $handler($request);
+            return $this->finish($handler($request), $session);
         }
 
         // Пользовательская дорога (/, /blog/*, ...) со своими глобальными middleware.
-        $userRouter = new Router([
-            new \App\Core\System\Http\Middleware\MaintenanceMode(
+        $userRouter = new Router(array_merge(
+            $this->globalMiddleware($request),
+            [new \App\Core\System\Http\Middleware\MaintenanceMode(
                 $this->container->get(ErrorPageInterface::class),
                 $state
-            ),
-        ]);
+            )],
+        ));
         $userRouter->get('/', fn(Request $r): Response => $this->homeResponse());
 
         $handler = $userRouter->match($request->method, $request->path);
 
         if ($handler === null) {
-            return $this->errorPage(404);
+            return $this->finish($this->errorPage(404), $session);
         }
 
-        return $handler($request);
+        return $this->finish($handler($request), $session);
+    }
+
+    /**
+     * Глобальные middleware обеих дорог (п.4 Конституции): CSRF-защита.
+     * Подключается только если доступны Session и Error (после установки).
+     */
+    private function globalMiddleware(Request $request): array
+    {
+        if (!$this->container->has(SessionInterface::class)) {
+            return [];
+        }
+
+        return [new \App\Core\System\Http\Middleware\CsrfProtect(
+            $this->container->get(SessionInterface::class),
+            $this->container->get(ErrorPageInterface::class),
+        )];
+    }
+
+    /** Завершение запроса: сохранить сессию + выдать куку, если надо. */
+    private function finish(Response $response, ?SessionInterface $session): Response
+    {
+        if ($session === null) {
+            return $response;
+        }
+
+        try {
+            $session->save();
+            if (!$session->clientHasValidCookie() && $session->id() !== '') {
+                $response = $response->withCookie($session->sessionCookieHeader());
+            }
+        } catch (\Throwable $e) {
+            // сессия не должна ронять ответ — пишем в лог и продолжаем
+            if ($this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
+                $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)
+                    ->error('Session save failed: ' . $e->getMessage(), ['channel' => 'Session']);
+            }
+        }
+
+        return $response;
+    }
+
+    /**
+     * Фоновая миграция хранилища сессий после смены session.driver.
+     * Маркер — в storage/.session_store.<driver>; выполняется один раз на драйвер.
+     */
+    private function migrateSessionStoreOnce(SessionInterface $session): void
+    {
+        $driver  = $session->driver();
+        $storage = (string) $this->container->get('storage_path');
+        $marker  = $storage . '/.session_store.' . $driver;
+        if (is_file($marker)) {
+            return;
+        }
+
+        $other = $driver === 'redis' ? 'file' : 'redis';
+        try {
+            $moved = $session->migrateStore($other, $driver);
+            @file_put_contents($marker, (string) time());
+            if ($moved > 0 && $this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
+                $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)->info(
+                    "Миграция сессий {$other} -> {$driver}: перенесено {$moved}",
+                    ['channel' => 'Session']
+                );
+            }
+        } catch (\Throwable) {
+            // недоступный стор-источник — миграция не нужна, помечаем выполненной
+            @file_put_contents($marker, (string) time());
+        }
     }
 
     /**

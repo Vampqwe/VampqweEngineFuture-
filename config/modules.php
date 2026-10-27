@@ -78,6 +78,11 @@ return [
         'provider' => \App\Core\Module\Security\Providers\SecurityServiceProvider::class,
         'critical' => false,
     ],
+    // Сессии + куки + CSRF. Уровень 4+: после Config и Security (подпись кук).
+    'Session' => [
+        'provider' => \App\Core\Module\Session\Providers\SessionServiceProvider::class,
+        'critical' => false,
+    ],
     'Template' => [
         'provider' => \App\Core\Module\Template\Providers\TemplateServiceProvider::class,
         'critical' => false,

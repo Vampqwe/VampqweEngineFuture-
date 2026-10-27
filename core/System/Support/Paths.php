@@ -27,8 +27,9 @@ final class Paths
         'public'      => 'public',
         'view'        => 'view',
         'modules_app' => 'app/modules',
-        'logs'        => 'logs',          // логи модулей: logs/<дата>/<канал>.log
-        'cache'       => 'storage/cache', // кэш движка
+        'logs'        => 'logs',           // логи модулей: logs/<дата>/<канал>.log
+        'cache'       => 'storage/cache',  // кэш движка
+        'sessions'    => 'storage/sessions', // file-стор сессий (Session, driver=file)
     ];
 
     public function __construct(private readonly string $basePath)

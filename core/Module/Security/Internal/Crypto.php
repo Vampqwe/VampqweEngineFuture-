@@ -4,11 +4,56 @@ declare(strict_types=1);
 namespace App\Core\Module\Security\Internal;
 
 /**
- * Внутренняя криптография (openssl AES-256-GCM, password_hash).
+ * Внутренняя криптография модуля Security: AES-256-GCM поверх app.key.
+ * Формат payload: base64( "gcm1" | iv(12) | tag(16) | ciphertext ).
  * ЗАПРЕЩЕНО использовать напрямую извне модуля (п.2 Конституции).
- * Реализация — в плане.
  */
 final class Crypto
 {
-    // TODO: encrypt/decrypt/sign поверх app.key из конфигурации.
+    private const CIPHER  = 'aes-256-gcm';
+    private const MAGIC   = 'gcm1';
+    private const IV_LEN  = 12;
+    private const TAG_LEN = 16;
+
+    public static function encrypt(string $plaintext, string $appKey): string
+    {
+        $iv  = random_bytes(self::IV_LEN);
+        $tag = '';
+        $ct  = openssl_encrypt(
+            $plaintext, self::CIPHER, self::aesKey($appKey),
+            OPENSSL_RAW_DATA, $iv, $tag, '', self::TAG_LEN
+        );
+        if ($ct === false) {
+            throw new \RuntimeException('Шифрование не удалось (openssl).');
+        }
+
+        return base64_encode(self::MAGIC . $iv . $tag . $ct);
+    }
+
+    /** @return string|null null — повреждён/подделан payload или неверный ключ */
+    public static function decrypt(string $payload, string $appKey): ?string
+    {
+        $raw = base64_decode($payload, true);
+        if ($raw === false || !str_starts_with($raw, self::MAGIC)) {
+            return null;
+        }
+        $raw = substr($raw, strlen(self::MAGIC));
+        if (strlen($raw) < self::IV_LEN + self::TAG_LEN) {
+            return null;
+        }
+        $iv = substr($raw, 0, self::IV_LEN);
+        $tag = substr($raw, self::IV_LEN, self::TAG_LEN);
+        $ct  = substr($raw, self::IV_LEN + self::TAG_LEN);
+        $pt  = openssl_decrypt($ct, self::CIPHER, self::aesKey($appKey), OPENSSL_RAW_DATA, $iv, $tag);
+
+        return $pt === false ? null : $pt;
+    }
+
+    /** Ключ фиксированной длины (32 байта) из произвольного app.key. */
+    public static function aesKey(string $appKey): string
+    {
+        return hash('sha256', $appKey, true);
+    }
+
+    private function __construct() {}
 }
