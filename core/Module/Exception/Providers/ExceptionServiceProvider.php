@@ -5,9 +5,11 @@ namespace App\Core\Module\Exception\Providers;
 
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Contracts\ModuleProviderInterface;
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 use App\Core\Module\Exception\ExceptionHandler;
 use App\Core\Module\Logger\Contracts\LoggerInterface;
+use App\Core\Module\Logger\FallbackLogger;
 
 class ExceptionServiceProvider implements ModuleProviderInterface
 {
@@ -17,10 +19,19 @@ class ExceptionServiceProvider implements ModuleProviderInterface
     {
         $this->container = $container;
 
-        $container->instance(ExceptionHandlerInterface::class, new ExceptionHandler(
-            $container->get(LoggerInterface::class),
-            true
-        ));
+        // Ленивая регистрация: зависимости (Logger, Config) резолвятся при первом обращении,
+        // а не в момент boot провайдера. Debug-режим берётся из конфигурации, а не хардкода.
+        $container->bind(ExceptionHandlerInterface::class, function (ContainerInterface $c): ExceptionHandlerInterface {
+            $debug = false;
+            if ($c->has(ConfigRepositoryInterface::class)) {
+                $debug = (bool) $c->get(ConfigRepositoryInterface::class)->get('app.debug', false);
+            }
+
+            return new ExceptionHandler(
+                $c->get(LoggerInterface::class),
+                $debug
+            );
+        });
     }
 
     public function boot(): void
@@ -31,23 +42,33 @@ class ExceptionServiceProvider implements ModuleProviderInterface
 
     public function handleException(\Throwable $exception): void
     {
-        if ($this->container !== null && $this->container->has(ExceptionHandlerInterface::class)) {
-            $handler = $this->container->get(ExceptionHandlerInterface::class);
-        } else {
-            $handler = $this->createFallbackHandler();
-        }
+        try {
+            if ($this->container !== null && $this->container->has(ExceptionHandlerInterface::class)) {
+                $handler = $this->container->get(ExceptionHandlerInterface::class);
+            } else {
+                $handler = $this->createFallbackHandler();
+            }
 
-        $handler->report($exception);
-        
-        $response = $handler->render(
-            \App\Core\System\Http\Request::createFromGlobals(),
-            $exception
-        );
-        
-        $response->send();
+            $handler->report($exception);
+
+            $response = $handler->render(
+                \App\Core\System\Http\Request::createFromGlobals(),
+                $exception
+            );
+
+            $response->send();
+        } catch (\Throwable $e) {
+            // Если даже обработчик исключений упал — пишем в stderr, без рекурсии
+            error_log('Fatal during exception handling: ' . $e->getMessage());
+            http_response_code(500);
+            echo '<h1>Internal Server Error</h1>';
+        }
     }
 
-    public function handleError(int $severity, string $message, string $file, int $line): bool
+    /**
+     * @param array<string,mixed>|null $context — 5-й параметр обязателен по контракту set_error_handler
+     */
+    public function handleError(int $severity, string $message, string $file, int $line, ?array $context = null): bool
     {
         if (!(error_reporting() & $severity)) {
             return false;
@@ -58,38 +79,11 @@ class ExceptionServiceProvider implements ModuleProviderInterface
 
     private function createFallbackHandler(): ExceptionHandlerInterface
     {
-        $logPath = BASE_PATH . '/storage/logs';
-        
-        if (!is_dir($logPath)) {
-            mkdir($logPath, 0755, true);
-        }
+        $logPath = (defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 4)) . '/storage/logs';
 
-        $logger = new class($logPath) implements LoggerInterface {
-            private string $logPath;
+        $logger = new FallbackLogger($logPath);
 
-            public function __construct(string $logPath)
-            {
-                $this->logPath = $logPath;
-            }
-
-            public function emergency(string $message, array $context = []): void { $this->log('EMERGENCY', $message); }
-            public function alert(string $message, array $context = []): void { $this->log('ALERT', $message); }
-            public function critical(string $message, array $context = []): void { $this->log('CRITICAL', $message); }
-            public function error(string $message, array $context = []): void { $this->log('ERROR', $message); }
-            public function warning(string $message, array $context = []): void { $this->log('WARNING', $message); }
-            public function notice(string $message, array $context = []): void { $this->log('NOTICE', $message); }
-            public function info(string $message, array $context = []): void { $this->log('INFO', $message); }
-            public function debug(string $message, array $context = []): void { $this->log('DEBUG', $message); }
-            public function log(string $level, string $message, array $context = []): void { $this->log($level, $message); }
-
-            private function log(string $level, string $message): void
-            {
-                $logFile = $this->logPath . '/' . date('Y-m-d') . '.log';
-                $entry = sprintf("[%s] %s: %s\n", date('Y-m-d H:i:s'), $level, $message);
-                file_put_contents($logFile, $entry, FILE_APPEND);
-            }
-        };
-
+        // В fallback-режиме всегда показываем детали — основной механизм рендера недоступен
         return new ExceptionHandler($logger, true);
     }
 }
