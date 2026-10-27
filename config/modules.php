@@ -10,7 +10,7 @@ declare(strict_types=1);
  * ]
  *
  * ПОРЯДОК КРИТИЧЕН (п.6 Конституции): модули идут по уровням зависимостей:
- *   0: FileSystem, Parser            — фундамент, без зависимостей
+ *   0: FileSystem, Parser, ArrayHelper — фундамент, без зависимостей
  *   1: Config                        — зависит от FileSystem (парсер PHP-конфигов)
  *   2: Logger, TimeDate              — Logger <- FileSystem+Config; TimeDate <- Config
  *   3: Exception, Error              — обработчик/страницы ошибок <- Logger+Config
@@ -21,7 +21,6 @@ declare(strict_types=1);
  * пропускает модули, чьих классов ещё нет (для некритичных).
  */
 return [
-    'path' => 'config/modules.php',
 
     // --- Уровень 0: фундамент ---
     'FileSystem' => [

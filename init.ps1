@@ -128,7 +128,7 @@ New-Item -ItemType Directory -Force -Path "assets\fonts" | Out-Null
 New-Item -ItemType Directory -Force -Path "assets\images" | Out-Null
 
 New-Item -ItemType Directory -Force -Path "storage\cache" | Out-Null
-New-Item -ItemType Directory -Force -Path "storage\logs" | Out-Null
+New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 New-Item -ItemType Directory -Force -Path "storage\sessions" | Out-Null
 New-Item -ItemType Directory -Force -Path "storage\uploads" | Out-Null
 New-Item -ItemType Directory -Force -Path "storage\queue" | Out-Null
@@ -150,7 +150,7 @@ New-Item -ItemType Directory -Force -Path "vendor" | Out-Null
 # ============================================
 
 # .gitkeep для пустых папок (чтобы Git их увидел)
-New-Item -ItemType File -Force -Path "storage\logs\.gitkeep" | Out-Null
+New-Item -ItemType File -Force -Path "logs\.gitkeep" | Out-Null
 New-Item -ItemType File -Force -Path "storage\cache\.gitkeep" | Out-Null
 New-Item -ItemType File -Force -Path "storage\sessions\.gitkeep" | Out-Null
 New-Item -ItemType File -Force -Path "storage\uploads\.gitkeep" | Out-Null
@@ -232,7 +232,7 @@ $app->run();
 
 # Данные приложения
 /storage/cache/*
-/storage/logs/*
+/logs/*
 /storage/sessions/*
 /storage/uploads/*
 /storage/queue/*

@@ -22,12 +22,14 @@ class ExceptionHandler implements ExceptionHandlerInterface
 
     public function report(Throwable $exception): void
     {
+        // Канал 'Exception' — каждая подсистема пишет в свой файл logs/<дата>/Exception.log
         $this->logger->error(
             $exception->getMessage(),
             [
-                'file' => $exception->getFile(),
-                'line' => $exception->getLine(),
-                'trace' => $exception->getTraceAsString(),
+                'channel' => 'Exception',
+                'file'    => $exception->getFile(),
+                'line'    => $exception->getLine(),
+                'trace'   => $exception->getTraceAsString(),
             ]
         );
     }
