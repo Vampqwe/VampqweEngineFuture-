@@ -175,6 +175,29 @@ final class SqlFileRunner
         $out = preg_replace('/,\s*,+/', ',', $out);
         $out = preg_replace('/,\s*\)/', "\n)", $out);
 
+        // Дампы phpMyAdmin выносят PRIMARY KEY в постфиксный ALTER TABLE, а в
+        // CREATE TABLE id остаётся «INTEGER NOT NULL». В SQLite rowid-таблица без
+        // PK не даёт AUTOINCREMENT — INSERT без id падает. Делаем первую колонку
+        // `id` полноценным INTEGER PRIMARY KEY AUTOINCREMENT (ровно одна на таблицу).
+        if (preg_match('/^CREATE\s+TABLE\s+\S+\s*\(/i', $out) && str_contains($out, 'PRIMARY KEY') === false) {
+            $out = preg_replace(
+                '/(\()((?:[^"\']*"[^"\']*")?\s*id\s+)INTEGER\s+NOT\b/i',
+                '$1$2INTEGER PRIMARY KEY AUTOINCREMENT NOT',
+                $out,
+                1,
+                $count
+            ) ?? $out;
+            if ($count === 0) {
+                // вариант без кавычек: "  id INTEGER NOT NULL,"
+                $out = preg_replace(
+                    '/(\(\s*(?:`\w+`|[\w]+)?\s*)\bid\s+INTEGER\s+NOT\s+NULL/i',
+                    '$1id INTEGER PRIMARY KEY AUTOINCREMENT',
+                    $out,
+                    1,
+                ) ?? $out;
+            }
+        }
+
         return $out;
     }
 
