@@ -114,6 +114,14 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
             $this->logger->info('Установка завершена успешно', ['channel' => 'Installer']);
 
+            // Флаг .installed ставим ТОЛЬКО после успешной схемы. Иначе при недоступной
+            // СУБД движок считался бы установленным с пустой базой (рассинхрон состояний).
+            if ($this->isSchemaFailure($summary['schema'] ?? '')) {
+                $this->fs->delete($this->storagePath . '/' . self::FLAG_INSTALLED);
+
+                return false;
+            }
+
             return $summary;
         } catch (Throwable $e) {
             $this->logger->error('Установка прервана: ' . $e->getMessage(), [
@@ -274,6 +282,30 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         return is_string($p) && $p !== '' ? $p : $this->basePath . DIRECTORY_SEPARATOR . 'logs';
     }
 
+    /** Установка считается неудачной, если схема не была развёрнута (СУБД/дамп недоступны). */
+    private function isSchemaFailure(string $schemaResult): bool
+    {
+        return str_starts_with($schemaResult, 'пропущено')
+            || str_starts_with($schemaResult, 'предупреждение');
+    }
+
+    /**
+     * Имена таблиц из SQL-дампа (CREATE TABLE [IF NOT EXISTS] `name`).
+     * Используется для честной проверки идемпотентности схемы.
+     *
+     * @return list<string>
+     */
+    private function dumpTables(string $sql): array
+    {
+        preg_match_all(
+            '/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"\[]?([A-Za-z0-9_]+)[`"\]]?/i',
+            $sql,
+            $m,
+        );
+
+        return array_values(array_unique($m[1] ?? []));
+    }
+
     /**
      * Schema-шаг установки: прогон дампа database/db.sql через Database::migrate().
      * Идемпотентно: если таблица схемы уже существует — повторный пропуск не выполняется.
@@ -292,16 +324,24 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
             // Фиксированное имя дампа; папка — только из Paths, без dirname/конкатенаций корня.
             $dumpFile = rtrim($this->databasePath, '/') . '/db.sql';
-            if (!is_file($dumpFile)) {
+            if (!$this->fs->isFile($dumpFile)) {
                 return "пропущено (не найден {$dumpFile})";
             }
 
-            // Идемпотентность: если одна из таблиц схемы уже есть — БД считается развёрнутой.
-            if ($this->db->tableExists('pages')) {
-                return 'уже развёрнута (таблицы схемы обнаружены, пропущено)';
+            // Идемпотентность по ПОЛНОМУ набору таблиц дампа, а не по одной «счастливой»
+            // таблице: ранее схема могла быть развёрнута частично (например, упал один
+            // оператор), и проверка по 'pages' давала ложное «уже развёрнута».
+            $tables     = $this->dumpTables($this->fs->read($dumpFile));
+            $missing    = array_values(array_filter(
+                $tables,
+                fn (string $t): bool => !$this->db->tableExists($t),
+            ));
+
+            if ($tables !== [] && $missing === []) {
+                return 'уже развёрнута (' . count($tables) . ' таблиц схемы обнаружено, пропущено)';
             }
 
-            $statements = $this->db->migrate((string) file_get_contents($dumpFile));
+            $statements = $this->db->migrate($this->fs->read($dumpFile));
 
             $this->logger->info("Схема БД развёрнута: {$statements} операторов из db.sql", [
                 'channel' => 'Installer',
@@ -309,10 +349,12 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
             return "развёрнута ({$statements} операторов из db.sql)";
         } catch (Throwable $e) {
-            $this->logger->warning('Schema-шаг установки не выполнен: ' . $e->getMessage(), [
+            $this->logger->error('Schema-шаг установки не выполнен: ' . $e->getMessage(), [
                 'channel' => 'Installer',
             ]);
 
+            // Ошибка схемы — это провал установки (не «предупреждение»): без таблиц
+            // движок неработоспособен, флаг .installed будет снят вызывающим.
             return 'предупреждение: ' . $e->getMessage();
         }
     }
