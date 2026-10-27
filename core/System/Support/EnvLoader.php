@@ -37,6 +37,19 @@ class EnvLoader
             $name  = trim(substr($line, 0, $pos));
             $value = trim(substr($line, $pos + 1));
 
+            // Инлайн-комментарий: KEY=value # пояснение или KEY= # пояснение.
+            // Работает, только если перед # стоит пробел ИЛИ значение пустое;
+            // внутри кавычек символ # не трогается (ветка срезки кавычек ниже).
+            if ($value !== '' && $value[0] !== '"' && $value[0] !== "'") {
+                $hashPos = strpos($value, ' #');
+                if ($hashPos === false && str_starts_with($value, '#')) {
+                    $hashPos = 0;
+                }
+                if ($hashPos !== false) {
+                    $value = rtrim(substr($value, 0, $hashPos));
+                }
+            }
+
             // Срезаем кавычки: KEY="value" / KEY='value'
             if (strlen($value) > 1
                 && (($value[0] === '"' && str_ends_with($value, '"'))
