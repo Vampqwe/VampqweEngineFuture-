@@ -10,11 +10,6 @@ use App\Core\Module\Migration\Internal\AbstractMigration;
  */
 final class AddSlugIndexToPages extends AbstractMigration
 {
-    public function __construct(DatabaseInterface $db, string $migrationId = '2026_10_27_120000_add_slug_index_to_pages')
-    {
-        parent::__construct($db, $migrationId);
-    }
-
     public function description(): string
     {
         return 'Индекс по pages.slug (ускоряет выборку страниц по ЧПУ)';
@@ -29,3 +24,5 @@ final class AddSlugIndexToPages extends AbstractMigration
         return $this->addIndexIfMissing('idx_pages_slug', 'pages', 'slug');
     }
 }
+
+return static fn(DatabaseInterface $db): AbstractMigration => new AddSlugIndexToPages($db, '');
