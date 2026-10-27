@@ -1,1 +1,3 @@
-session-security.bundle
+logs/
+.env
+storage/database.sqlite
