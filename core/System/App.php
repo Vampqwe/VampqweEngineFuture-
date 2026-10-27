@@ -24,6 +24,20 @@ class App
         $this->registerModuleProviders();
 
         $this->kernel = new Kernel($this->container);
+
+        // Хук «движок собран»: подписчики (будущие Auth/Pages/модули сайта)
+        // могут регистрировать свои слушатели/маршруты в момент старта,
+        // не трогая ядро. Dispatch защищён: сбой подписчика не валит boot.
+        if ($this->container->has(\App\Core\Module\Hook\Contracts\HookInterface::class)) {
+            try {
+                /** @var \App\Core\Module\Hook\Contracts\HookInterface $hooks */
+                $hooks = $this->container->get(\App\Core\Module\Hook\Contracts\HookInterface::class);
+                $hooks->dispatch('engine.booted', $this->container);
+            } catch (\Throwable) {
+                // Hook сам гасит ошибки слушателей; сюда попасть не должен —
+                // но молча продолжаем, чтобы boot не зависел от чужих подписок.
+            }
+        }
     }
 
     private function registerCoreServices(): void

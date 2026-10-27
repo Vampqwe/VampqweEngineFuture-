@@ -25,8 +25,8 @@
 ├── public/        ← точка входа (index.php, router.php для php -S)
 ├── core/
 │   ├── System/    ← ядро: App, Container, Http (Kernel, Request, Response, Middleware), Support (Router, EnvLoader), Enums
-│   └── Module/    ← 15 модулей ядра: FileSystem, Parser, ArrayHelper, Config, Logger, TimeDate,
-│                    Exception, Error, Cache, Database, Security, Template, Queue, Doctor, Installer
+│   └── Module/    ← 16 модулей ядра: FileSystem, Parser, ArrayHelper, Hook, Config, Logger, TimeDate,
+│                    Exception, Error, Cache, Database, Security, Session, Template, Queue, Doctor, Installer
 ├── config/        ← app.php, modules.php (манифест модулей)
 ├── storage/       ← cache, sessions, queue + файлы-флаги состояния (.installed и др.)
 ├── logs/          ← логи по каналам: logs/<дата>/<Модуль>.log (каждый модуль — свой файл)
