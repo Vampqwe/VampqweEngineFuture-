@@ -13,3 +13,8 @@
 [2026-10-27 06:27:14] ERROR: probe-error-handler-works
 [2026-10-27 06:27:16] ERROR: probe-error-handler-works
 [2026-10-27 06:27:56] ERROR: http-probe-exception
+[2026-10-27 06:46:16] ERROR: Uncaught RuntimeException: Сервис [App\Core\System\App\Core\Module\Doctor\Contracts\DoctorInterface] не найден в контейнере. in /workspace/core/System/Container/Container.php:70
+Stack trace:
+#0 Command line code(31): App\Core\System\Container\Container->get()
+#1 {main}
+  thrown

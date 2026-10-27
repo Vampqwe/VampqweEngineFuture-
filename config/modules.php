@@ -2,40 +2,68 @@
 declare(strict_types=1);
 
 /**
- * Манифест модулей ядра.
+ * Манифест модулей ядра — ЕДИНСТВЕННЫЙ источник истины о подключаемых модулях.
  *
  * Формат: ModuleName => [
  *     'provider' => FQN провайдера,
- *     'critical' => критичен ли модуль для работы движка
+ *     'critical' => критичен ли модуль для старта движка,
  * ]
  *
- * ВАЖНО: этот файл — единственный источник истины о подключаемых модулях.
- * App::registerModuleProviders() читает его и пропускает модули, чьих
- * провайдеров ещё нет в коде (для некритичных). Критичные модули обязаны
- * существовать — иначе будет понятная ошибка на старте.
+ * ПОРЯДОК КРИТИЧЕН (п.6 Конституции): модули идут по уровням зависимостей:
+ *   0: FileSystem, Parser            — фундамент, без зависимостей
+ *   1: Config                        — зависит от FileSystem (парсер PHP-конфигов)
+ *   2: Logger, TimeDate              — Logger <- FileSystem+Config; TimeDate <- Config
+ *   3: Exception, Error              — обработчик/страницы ошибок <- Logger+Config
+ *   4+: Cache, Database, Security, Template, Queue, Doctor, Installer
+ *       — поздние модули <- Config (+ вышеперечисленные)
+ *
+ * App::registerModuleProviders() регистрирует провайдеры в этом порядке и
+ * пропускает модули, чьих классов ещё нет (для некритичных).
  */
 return [
-    // --- Модули ядра, реализованные на текущем этапе ---
+    'path' => 'config/modules.php',
+
+    // --- Уровень 0: фундамент ---
     'FileSystem' => [
         'provider' => \App\Core\Module\FileSystem\Providers\FileSystemServiceProvider::class,
         'critical' => true,
     ],
+    'Parser' => [
+        'provider' => \App\Core\Module\Parser\Providers\ParserServiceProvider::class,
+        'critical' => false,
+    ],
+
+    // --- Уровень 1: конфигурация ---
     'Config' => [
         'provider' => \App\Core\Module\Config\Providers\ConfigServiceProvider::class,
         'critical' => true,
     ],
+
+    // --- Уровень 2: журнал и время ---
     'Logger' => [
         'provider' => \App\Core\Module\Logger\Providers\LoggerServiceProvider::class,
         'critical' => true,
     ],
+    'TimeDate' => [
+        'provider' => \App\Core\Module\TimeDate\Providers\TimeDateServiceProvider::class,
+        'critical' => false,
+    ],
+
+    // --- Уровень 3: ошибки ---
     'Exception' => [
         'provider' => \App\Core\Module\Exception\Providers\ExceptionServiceProvider::class,
         'critical' => true,
     ],
+    'Error' => [
+        'provider' => \App\Core\Module\Error\Providers\ErrorServiceProvider::class,
+        'critical' => false,
+    ],
 
-    // --- Запланированные модули (ещё не реализованы) ---
-    // Раскомментируйте секцию, когда появятся соответствующие провайдеры.
-    /*
+    // --- Уровень 4+: сервисные модули (скелеты, реализация в плане) ---
+    'Cache' => [
+        'provider' => \App\Core\Module\Cache\Providers\CacheServiceProvider::class,
+        'critical' => false,
+    ],
     'Database' => [
         'provider' => \App\Core\Module\Database\Providers\DatabaseServiceProvider::class,
         'critical' => false,
@@ -48,25 +76,16 @@ return [
         'provider' => \App\Core\Module\Template\Providers\TemplateServiceProvider::class,
         'critical' => false,
     ],
-    'Installer' => [
-        'provider' => \App\Core\Module\Installer\Providers\InstallerServiceProvider::class,
+    'Queue' => [
+        'provider' => \App\Core\Module\Queue\Providers\QueueServiceProvider::class,
         'critical' => false,
     ],
     'Doctor' => [
         'provider' => \App\Core\Module\Doctor\Providers\DoctorServiceProvider::class,
         'critical' => false,
     ],
-    'Maintenance' => [
-        'provider' => \App\Core\Module\Maintenance\Providers\MaintenanceServiceProvider::class,
+    'Installer' => [
+        'provider' => \App\Core\Module\Installer\Providers\InstallerServiceProvider::class,
         'critical' => false,
     ],
-    'Cache' => [
-        'provider' => \App\Core\Module\Cache\Providers\CacheServiceProvider::class,
-        'critical' => false,
-    ],
-    'Queue' => [
-        'provider' => \App\Core\Module\Queue\Providers\QueueServiceProvider::class,
-        'critical' => false,
-    ],
-    */
 ];

@@ -3,17 +3,36 @@ declare(strict_types=1);
 
 namespace App\Core\System\Support;
 
+use App\Core\System\Http\MiddlewareInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
 
 /**
  * Минимальный маршрутизатор.
- * Поддерживает статические пути и параметры вида /users/{id}.
+ * Поддерживает статические пути, параметры вида /users/{id}
+ * и группу middleware, применяемых ко всем маршрутам этого роутера
+ * (у каждой «дороги» — свой экземпляр Router со своими middleware).
  */
 class Router
 {
     /** @var array<string, array<int, array{pattern:string, regex:string, params:string[], handler:callable}>> */
     private array $routes = [];
+
+    /** @var list<MiddlewareInterface> */
+    private array $middleware = [];
+
+    /**
+     * @param list<MiddlewareInterface> $middleware
+     */
+    public function __construct(array $middleware = [])
+    {
+        $this->middleware = $middleware;
+    }
+
+    public function addMiddleware(MiddlewareInterface $middleware): void
+    {
+        $this->middleware[] = $middleware;
+    }
 
     public function get(string $pattern, callable $handler): void
     {
@@ -44,8 +63,18 @@ class Router
                     $params = [];
                 }
 
+                $handler = $route['handler'];
+                $destination = static fn(Request $req): Response => $handler($req);
+
+                // Оборачиваем обработчик в middleware (внешний — первый).
+                foreach (array_reverse($this->middleware) as $middleware) {
+                    $next = $destination;
+                    $destination = static fn(Request $req): Response
+                        => $middleware->process($req, $next);
+                }
+
                 return static fn(Request $request): Response
-                    => $route['handler']($request->withRouteParams($params));
+                    => $destination($request->withRouteParams($params));
             }
         }
 
