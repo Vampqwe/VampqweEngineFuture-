@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Core\Module\Installer;
 
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
@@ -23,8 +24,9 @@ use Throwable;
  *
  * Поток: GET /install -> требования -> POST /install/settings (форма) ->
  *        POST /install/run -> install() -> success.
- * Database-шаг намеренно отсутствует: модуль Database ещё не реализован,
- * установка не может падать из-за нереализованных соседей (п.9).
+ * Database-шаг опционален и НЕ критичен: если активный драйвер недоступен,
+ * установка продолжается (флаг .installed всё равно ставится), а ошибка уходит
+ * в лог канала 'Installer' — движок не падает из-за соседей (п.9).
  */
 final class Installer implements InstallerInterface, InstallerPageInterface
 {
@@ -38,6 +40,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         private readonly SecurityInterface $security,
         private readonly ConfigRepositoryInterface $config,
         private readonly LoggerInterface $logger,
+        private readonly ?DatabaseInterface $db = null,
     ) {
     }
 
@@ -46,13 +49,21 @@ final class Installer implements InstallerInterface, InstallerPageInterface
     /** @return array<string,bool> label => ok */
     public function requirements(): array
     {
-        return [
+        $checks = [
             'PHP >= 8.1'          => PHP_VERSION_ID >= 80100,
             'Расширение json'     => extension_loaded('json'),
             'Расширение mbstring' => extension_loaded('mbstring'),
+            'Расширение PDO'      => extension_loaded('pdo'),
             'storage записываем'  => is_writable($this->storagePath),
             'logs записываем'     => $this->ensureWritableDir($this->logDirFromPaths()),
         ];
+
+        // Драйвер БД: активный по умолчанию mysql — проверяем pdo_mysql;
+        // включённые доп. драйверы проверяются только если реально enabled в конфиге.
+        $driver = strtolower((string) $this->config->get('database.driver', 'mysql'));
+        $checks['PDO-драйвер: ' . $driver] = in_array($driver, \PDO::getAvailableDrivers(), true);
+
+        return $checks;
     }
 
     public function install(array $options = []): bool
@@ -85,6 +96,10 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
             // Флаг готовности — AppState::Running определяется по нему
             $this->fs->createFile($this->storagePath . '/' . self::FLAG_INSTALLED);
+
+            // Database-шаг: создаём БД, если активный драйвер включён и доступен.
+            // Недоступная СУБД НЕ валит установку — ошибка уходит в лог канала Installer.
+            $dbSummary = $this->tryCreateDatabase();
 
             $this->logger->info('Установка завершена успешно', ['channel' => 'Installer']);
 
@@ -244,7 +259,75 @@ final class Installer implements InstallerInterface, InstallerPageInterface
     private function logDirFromPaths(): string
     {
         $p = $this->config->get('paths.logs');
+
         return is_string($p) && $p !== '' ? $p : $this->basePath . DIRECTORY_SEPARATOR . 'logs';
+    }
+
+    /**
+     * Database-шаг установки: создаёт отсутствующую БД на активном драйвере.
+     * Возвращает текст для successPage; недоступная СУБД — предупреждение, не провал.
+     */
+    private function tryCreateDatabase(): string
+    {
+        if ($this->db === null) {
+            return 'модуль Database недоступен (пропущено)';
+        }
+
+        $driver   = $this->db->driver();
+        $database = (string) $this->config->get("database.connections.{$driver}.database", '');
+
+        try {
+            if ($this->db->ping()) {
+                return "соединение установлено ({$driver})";
+            }
+
+            // mysql/pgsql: коннект к серверу без выбора БД + CREATE DATABASE IF NOT EXISTS.
+            // Имя БД экранируется backticks-ами и валидируется regex (защита от инъекции в DDL).
+            if ($driver === 'mysql' || $driver === 'pgsql') {
+                if (!preg_match('/^[A-Za-z0-9_]+$/', $database)) {
+                    return "имя БД '{$database}' недопустимо (только буквы/цифры/_), создание пропущено";
+                }
+
+                $serverDsn = $driver === 'mysql'
+                    ? sprintf(
+                        'mysql:host=%s;port=%d;charset=utf8mb4',
+                        (string) $this->config->get("database.connections.{$driver}.host", '127.0.0.1'),
+                        (int) $this->config->get("database.connections.{$driver}.port", 3306),
+                    )
+                    : sprintf(
+                        'pgsql:host=%s;port=%d',
+                        (string) $this->config->get("database.connections.{$driver}.host", '127.0.0.1'),
+                        (int) $this->config->get("database.connections.{$driver}.port", 5432),
+                    );
+
+                $root = new \PDO(
+                    $serverDsn,
+                    (string) $this->config->get("database.connections.{$driver}.username", ''),
+                    (string) $this->config->get("database.connections.{$driver}.password", ''),
+                    [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION],
+                );
+
+                $quoted = $driver === 'mysql' ? '`' . $database . '`' : '"' . $database . '"';
+                $charset = $driver === 'mysql' ? ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci' : '';
+                $root->exec("CREATE DATABASE IF NOT EXISTS {$quoted}" . $charset);
+
+                return "база '{$database}' создана/существует ({$driver})"
+                    . ($this->db->ping() ? ', соединение подтверждено' : '');
+            }
+
+            if ($driver === 'sqlite') {
+                // Файл создаётся самим PDO при первом коннекте — достаточно ping().
+                return $this->db->ping() ? "файл БД создан ({$driver})" : "sqlite недоступен (пропущено)";
+            }
+
+            return "драйвер '{$driver}' — создание пропущено";
+        } catch (Throwable $e) {
+            $this->logger->warning('Database-шаг установки не выполнен: ' . $e->getMessage(), [
+                'channel' => 'Installer',
+            ]);
+
+            return 'предупреждение: ' . $e->getMessage();
+        }
     }
 
     private function ensureWritableDir(string $dir): bool

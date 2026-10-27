@@ -18,8 +18,8 @@ interface DatabaseInterface
     /** Откатить транзакцию. */
     public function rollBack(): void;
 
-    /** Выполнить запрос с привязкой параметров (подготовленное выражение). */
-    public function run(string $sql, array $bindings = []): void;
+    /** Выполнить запрос с привязкой параметров (подготовленное выражение). @return int затронутых строк */
+    public function run(string $sql, array $bindings = []): int;
 
     /** Запрос, возвращающий массив строк. */
     public function select(string $sql, array $bindings = []): array;
@@ -29,6 +29,9 @@ interface DatabaseInterface
 
     /** Построитель запросов (возвращается как object — точный тип появится с реализацией). */
     public function query(string $table): object;
+
+    /** Активный драйвер (mysql|pgsql|sqlite) — для Doctor/диагностики. */
+    public function driver(): string;
 
     /** Проверка соединения (для Doctor). */
     public function ping(): bool;

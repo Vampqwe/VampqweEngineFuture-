@@ -195,6 +195,13 @@ class Kernel
             'time'    => date('c'),
         ];
 
+        // Database: честный статус PDO-соединения (ping() не бросает исключений).
+        if ($this->container->has(\App\Core\Module\Database\Contracts\DatabaseInterface::class)) {
+            /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $db */
+            $db = $this->container->get(\App\Core\Module\Database\Contracts\DatabaseInterface::class);
+            $payload['database'] = ['driver' => $db->driver(), 'connected' => $db->ping()];
+        }
+
         return new Response(
             json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: '{}',
             200,

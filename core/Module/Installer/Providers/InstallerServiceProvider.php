@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Core\Module\Installer\Providers;
 
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
@@ -24,7 +25,7 @@ class InstallerServiceProvider implements ModuleProviderInterface
 {
     public function register(ContainerInterface $container): void
     {
-        $factory = static function (ContainerInterface $c): Installer {
+        $container->bind(InstallerInterface::class, static function (ContainerInterface $c): Installer {
             return new Installer(
                 (string) $c->get('base_path'),
                 (string) $c->get('storage_path'),
@@ -32,14 +33,18 @@ class InstallerServiceProvider implements ModuleProviderInterface
                 $c->get(SecurityInterface::class),
                 $c->get(ConfigRepositoryInterface::class),
                 $c->get(LoggerInterface::class),
+                // Database — опциональная зависимость: без СУБД установка возможна,
+                // с доступной — Installer создаст базу на шаге install().
+                $c->has(DatabaseInterface::class) ? $c->get(DatabaseInterface::class) : null,
             );
-        };
+        });
 
-        // Один экземпляр на оба контракта — не дублируем состояние
-        $container->bind(InstallerInterface::class, $factory);
-        $container->bind(InstallerPageInterface::class, static function (ContainerInterface $c) use ($factory): Installer {
+        // InstallerPageInterface — тот же синглтон, что и InstallerInterface:
+        // Container кэширует результат bind(), дублирующего состояния нет.
+        $container->bind(InstallerPageInterface::class, static function (ContainerInterface $c): Installer {
             /** @var Installer $installer */
             $installer = $c->get(InstallerInterface::class);
+
             return $installer;
         });
     }

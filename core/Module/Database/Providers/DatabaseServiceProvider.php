@@ -20,11 +20,12 @@ class DatabaseServiceProvider implements ModuleProviderInterface
     public function register(ContainerInterface $container): void
     {
         $container->bind(DatabaseInterface::class, static function (ContainerInterface $c): DatabaseManager {
-            $driver = 'sqlite';
-            if ($c->has(ConfigRepositoryInterface::class)) {
-                $driver = (string) $c->get(ConfigRepositoryInterface::class)->get('database.driver', 'sqlite');
-            }
-            return new DatabaseManager($driver);
+            // Ленивое создание: PDO-соединение открывается только при первом запросе,
+            // поэтому движок стартует даже без доступной СУБД.
+            return new DatabaseManager(
+                $c->get(ContainerInterface::class),
+                $c->get(ConfigRepositoryInterface::class),
+            );
         });
     }
 
