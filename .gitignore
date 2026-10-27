@@ -1,10 +1,1 @@
-# Секреты и окружение — никогда не коммитим
-.env
-
-# Логи движка (layout: logs/<дата>/<канал>.log) — содержимое не в git, папка остаётся
-/logs/*
-!/logs/.gitkeep
-
-# Зависимости и артефакты
-/vendor/autoload.php
-*.bundle
+storage/.installed

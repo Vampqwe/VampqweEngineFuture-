@@ -75,8 +75,15 @@ final class Doctor implements DoctorInterface
         }
 
         // 3) Сверка манифеста и контейнера (внутренняя проверка Doctor).
-        if ($this->container->has(ConfigRepositoryInterface::class)) {
-            $manifest = $this->container->get(ConfigRepositoryInterface::class)->all('modules');
+        // Манифест читаем напрямую через PhpArrayParser (документированный бутстрап-слой):
+        // ConfigRepository::all() возвращает содержимое config/*.php БЕЗ имени файла,
+        // т.е. для 'modules' это уже внутренний массив модулей, а не ['modules' => [...]].
+        $configFile = $this->container->get('config_path') . '/modules.php';
+        if (is_file($configFile)) {
+            $manifest = (new \App\Core\Module\Config\Internal\Parsers\PhpArrayParser())->parse($configFile);
+            if (isset($manifest['modules']) && is_array($manifest['modules'])) {
+                $manifest = $manifest['modules']; // совместимость со старым форматом
+            }
             if ($manifest !== []) {
                 $results = array_merge(
                     $results,
@@ -125,7 +132,13 @@ final class Doctor implements DoctorInterface
                 case 'Template':
                     return [true, 'заглушка (реализация в плане; шаблонов нет)'];
                 case 'Installer':
-                    return [true, 'заглушка (requirements() работает, install() в плане)'];
+                    // Реальная проба: requirements() обязан вернуть полные проверки.
+                    $req = $instance->requirements();
+                    if (!is_array($req) || count($req) < 4) {
+                        return [false, 'НЕЗДОРОВ: requirements() вернул пустой набор проверок'];
+                    }
+                    return [true, 'работает (requirements: ' . count($req) . ' проверок'
+                        . ($instance->isInstalled() ? ', установлен' : ', не установлен') . ')'];
                 default:
                     return [true, 'модуль зарегистрирован и резолвится'];
             }
