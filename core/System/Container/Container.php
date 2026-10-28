@@ -70,6 +70,18 @@ class Container implements ContainerInterface
         throw new \RuntimeException("Сервис [{$abstract}] не найден в контейнере.");
     }
 
+    public function tryGet(string $abstract): mixed
+    {
+        // Только ЯВНАЯ регистрация (instance/bind). Никакого autowire:
+        // опциональный резолв capability не должен случайно «собирать»
+        // произвольные классы — отсутствие = null, честно и предсказуемо.
+        if (array_key_exists($abstract, $this->instances)) {
+            return $this->instances[$abstract];
+        }
+
+        return isset($this->bindings[$abstract]) ? $this->get($abstract) : null;
+    }
+
     public function has(string $abstract): bool
     {
         return array_key_exists($abstract, $this->instances)

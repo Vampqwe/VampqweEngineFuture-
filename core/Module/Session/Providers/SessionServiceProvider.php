@@ -6,6 +6,7 @@ namespace App\Core\Module\Session\Providers;
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
+use App\Core\Module\Session\Contracts\SessionStoreMigratorInterface;
 use App\Core\Module\Session\Internal\Stores\FileStore;
 use App\Core\Module\Session\Internal\Stores\RedisStore;
 use App\Core\Module\Session\ModuleSession;
@@ -44,6 +45,14 @@ class SessionServiceProvider implements ModuleProviderInterface
             ]);
 
             return $session;
+        });
+
+        // Capability-контракт фоновой миграции сторов: тот же синглтон,
+        // отдельный ключ — ядро резолвит способность, не зная сторов (п.4).
+        $container->bind(SessionStoreMigratorInterface::class, static function (ContainerInterface $c): SessionStoreMigratorInterface {
+            /** @var SessionStoreMigratorInterface $m */
+            $m = $c->get(SessionInterface::class);
+            return $m;
         });
     }
 

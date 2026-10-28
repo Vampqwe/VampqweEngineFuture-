@@ -6,6 +6,7 @@ namespace App\modules\Pages;
 use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\Error\Contracts\ErrorPageInterface;
 use App\Core\Module\Template\Contracts\TemplateInterface;
+use App\modules\Pages\Contracts\PageRendererInterface;
 use App\modules\Pages\Contracts\PageRepositoryInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
@@ -20,7 +21,7 @@ use App\Core\System\Http\Response;
  * Template недоступны (до установки/выключенный модуль) — 404 как при
  * отсутствующей странице, без исключений наружу.
  */
-final class PageController
+final class PageController implements PageRendererInterface
 {
     public function __construct(
         private readonly ?PageRepositoryInterface $pages,
