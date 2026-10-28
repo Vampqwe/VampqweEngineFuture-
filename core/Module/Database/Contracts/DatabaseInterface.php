@@ -30,6 +30,12 @@ interface DatabaseInterface
     /** Построитель запросов (возвращается как object — точный тип появится с реализацией). */
     public function query(string $table): object;
 
+    /**
+     * Идентификатор последней вставленной строки (LAST_INSERT_ID / RETURNING id).
+     * Нужен репозиториям модулей-потребителей (Pages и др.) для getPostId().
+     */
+    public function lastInsertId(): int;
+
     /** Прогон SQL-дампа (DDL схемы) через активное соединение. @return int выполненных операторов */
     public function migrate(string $sql): int;
 

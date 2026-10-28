@@ -72,6 +72,15 @@ class Kernel
         ));
         $userRouter->get('/', fn(Request $r): Response => $this->homeResponse($r));
 
+        // Страницы контента (модуль Pages, app/modules): /{slug} отдаёт
+        // опубликованную страницу через тему сайта. Подключается ТОЛЬКО если
+        // модуль зарегистрирован — ядро не жёстко зависит от приложения (п.2).
+        if ($this->container->has(\App\Modules\Pages\PageController::class)) {
+            /** @var \App\Modules\Pages\PageController $pages */
+            $pages = $this->container->get(\App\Modules\Pages\PageController::class);
+            $userRouter->get('/{slug}', fn(Request $r): Response => $pages->show($r));
+        }
+
         $handler = $userRouter->match($request->method, $request->path);
 
         if ($handler === null) {
