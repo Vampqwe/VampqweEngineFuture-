@@ -56,9 +56,15 @@ final class Theme implements ThemeInterface
                 $this->use($site['theme']);
                 return $site['theme'];
             }
-        } else {
-            $this->lastSite = null;
+
+            // Тема реестра без папки: деградируем на тему по умолчанию, НО
+            // возвращаем её как активную — иначе вызывающий код (Kernel) не
+            // сможет отличить «переключили» от «не переключали».
+            $this->use($this->defaultTheme);
+            return $this->defaultTheme;
         }
+
+        $this->lastSite = null;
 
         // 2. Эвристика поддомена: animals.local / animals.localhost -> 'animals'.
         //    Работает даже при недоступной БД (деградация, а не падение).
@@ -123,6 +129,12 @@ final class Theme implements ThemeInterface
 
     public function exists(string $theme): bool
     {
+        // Только безопасное имя папки-темы (та же защита, что в Template::setTheme):
+        // 'animals', '_default'; всё остальное ('../x', пустое) — не тема.
+        if (!preg_match('#^[A-Za-z0-9_\-]+$#', $theme)) {
+            return false;
+        }
+
         return $this->fs->isDirectory($this->appViewPath . '/' . $theme);
     }
 

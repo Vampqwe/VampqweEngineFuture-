@@ -113,6 +113,15 @@ return [
         'provider' => \App\Core\Module\Doctor\Providers\DoctorServiceProvider::class,
         'critical' => false,
     ],
+    // Admin: системная панель администратора (core/Module/Admin, п.1/п.3):
+    // ВСЕГДА активна — это часть движка, а не приложения. Уровень 4+: после
+    // Session/Security/Template/Hook; зависимости от пользовательских модулей
+    // (Auth/Pages/Doctor) — опциональны и ленивы (до установки деградирует честно).
+    'Admin' => [
+        'provider' => \App\Core\Module\Admin\Providers\AdminServiceProvider::class,
+        'critical' => false,
+    ],
+
     'Installer' => [
         'provider' => \App\Core\Module\Installer\Providers\InstallerServiceProvider::class,
         'critical' => false,
@@ -128,12 +137,6 @@ return [
     // Pages: страницы контента (таблица pages). Уровень 5+: после Database/Template/Error.
     'Pages' => [
         'provider' => \App\modules\Pages\Providers\PagesServiceProvider::class,
-        'critical' => false,
-    ],
-    // Admin: панель администратора (/admin/*). Уровень 6+: после Auth/Pages/Doctor —
-    // использует их публичные контракты; все зависимости опциональны (п.2/п.3).
-    'Admin' => [
-        'provider' => \App\modules\Admin\Providers\AdminServiceProvider::class,
         'critical' => false,
     ],
 ];

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Internal;
+namespace App\Core\Module\Admin\Internal;
 
 use App\Core\Module\Database\Contracts\DatabaseInterface;
 
@@ -39,7 +39,7 @@ final class UserRepository
     /** Сменить роль (значения ограничены whitelist — защита от «волшебных» ролей). */
     public function setRole(int $id, string $role): bool
     {
-        if (!in_array($role, \App\modules\Admin\Internal\AdminGuard::ADMIN_ROLES
+        if (!in_array($role, \App\Core\Module\Admin\Internal\AdminGuard::ADMIN_ROLES
             + ['user', 'editor', 'viewer'], true)
         ) {
             return false;

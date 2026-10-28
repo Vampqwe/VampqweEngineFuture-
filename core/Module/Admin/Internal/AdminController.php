@@ -1,15 +1,15 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Internal;
+namespace App\Core\Module\Admin\Internal;
 
 use App\Core\Module\Hook\Contracts\HookInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
-use App\modules\Admin\Contracts\AdminPanelInterface;
-use App\modules\Admin\Contracts\AdminSectionInterface;
-use App\modules\Admin\Contracts\GuardInterface;
+use App\Core\Module\Admin\Contracts\AdminPanelInterface;
+use App\Core\Module\Admin\Contracts\AdminSectionInterface;
+use App\Core\Module\Admin\Contracts\GuardInterface;
 use RuntimeException;
 
 /**

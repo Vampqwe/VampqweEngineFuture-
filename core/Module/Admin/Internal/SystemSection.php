@@ -1,13 +1,13 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Internal;
+namespace App\Core\Module\Admin\Internal;
 
 use App\Core\Module\Doctor\Contracts\DoctorInterface;
 use App\Core\Module\Template\Contracts\TemplateInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
-use App\modules\Admin\Contracts\AdminSectionInterface;
+use App\Core\Module\Admin\Contracts\AdminSectionInterface;
 
 /**
  * Раздел «Система»: самодиагностика Doctor прямо в панели (п.9 Конституции).

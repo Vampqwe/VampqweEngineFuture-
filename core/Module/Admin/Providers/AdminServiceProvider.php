@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Providers;
+namespace App\Core\Module\Admin\Providers;
 
 use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\Doctor\Contracts\DoctorInterface;
@@ -11,23 +11,24 @@ use App\Core\Module\Session\Contracts\SessionInterface;
 use App\Core\Module\Template\Contracts\TemplateInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Contracts\ModuleProviderInterface;
-use App\modules\Admin\Contracts\AdminPanelInterface;
-use App\modules\Admin\Contracts\GuardInterface;
-use App\modules\Admin\Internal\AdminController;
-use App\modules\Admin\Internal\AdminGuard;
-use App\modules\Admin\Internal\DashboardSection;
-use App\modules\Admin\Internal\PagesSection;
-use App\modules\Admin\Internal\SystemSection;
-use App\modules\Admin\Internal\UserRepository;
-use App\modules\Admin\Internal\UsersSection;
+use App\Core\Module\Admin\Contracts\AdminPanelInterface;
+use App\Core\Module\Admin\Contracts\GuardInterface;
+use App\Core\Module\Admin\Internal\AdminController;
+use App\Core\Module\Admin\Internal\AdminGuard;
+use App\Core\Module\Admin\Internal\DashboardSection;
+use App\Core\Module\Admin\Internal\PagesSection;
+use App\Core\Module\Admin\Internal\SystemSection;
+use App\Core\Module\Admin\Internal\UserRepository;
+use App\Core\Module\Admin\Internal\UsersSection;
 use App\modules\Auth\Contracts\AuthRepositoryInterface;
 use App\modules\Pages\Contracts\PageRepositoryInterface;
 
 /**
- * Провайдер пользовательского модуля Admin (app/modules/Admin).
+ * Провайдер СИСТЕМНОГО модуля Admin (core/Module/Admin, п.1 Конституции).
  *
- * Порядок загрузки (п.6): после Auth и Pages — панель использует их публичные
- * контракты. Все зависимости опциональны и резолвятся лениво: до установки
+ * Порядок загрузки (п.6): уровень 4+ — после Session/Security/Template/Hook.
+ * Зависимости от пользовательских модулей (Auth/Pages) — только через их
+ * публичные контракты, опциональны и резолвятся лениво: до установки
  * движка панель деградирует честно (503/редирект), а не падает.
  *
  * Публичные границы (п.2): AdminPanelInterface, GuardInterface,

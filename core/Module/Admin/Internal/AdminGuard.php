@@ -1,14 +1,14 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Internal;
+namespace App\Core\Module\Admin\Internal;
 
 use App\Core\Module\Security\Contracts\SecurityInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
 use App\Core\System\Support\SuperAdmin;
-use App\modules\Admin\Contracts\GuardInterface;
+use App\Core\Module\Admin\Contracts\GuardInterface;
 use App\modules\Auth\Contracts\AuthRepositoryInterface;
 
 /**

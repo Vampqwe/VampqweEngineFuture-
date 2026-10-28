@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Contracts;
+namespace App\Core\Module\Admin\Contracts;
 
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
