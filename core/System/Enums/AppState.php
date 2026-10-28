@@ -34,7 +34,24 @@ enum AppState: string
     /** Абсолютный путь маркера данного состояния от корня storage. */
     public function marker(string $storagePath): string
     {
-        return $storagePath . '/' . self::flagNames()[$this->name];
+        // Running — состояние «маркеров нет, есть только .installed»:
+        // его маркером является флаг NotInstalled (историческое имя).
+        $flags   = self::flagNames();
+        $marker  = $this === self::Running ? $flags[self::NotInstalled->name] : $flags[$this->name];
+
+        return $storagePath . '/' . $marker;
+    }
+
+    /**
+     * Флаг-маркер session-driver'а (storage/.session_store.<driver>):
+     * одноразовая фоновая миграция хранилища после смены session.driver.
+     * Не является состоянием движка — но живёт в том же каталоге флагов,
+     * поэтому имя определяется здесь (п.7: сегменты путей только из
+     * единого источника), а не литералом в Kernel.
+     */
+    public static function sessionStoreMarker(string $storagePath, string $driver): string
+    {
+        return $storagePath . '/.session_store.' . $driver;
     }
 
     /**

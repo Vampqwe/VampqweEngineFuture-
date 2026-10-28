@@ -9,6 +9,7 @@ use App\Core\Module\Hook\Contracts\HookInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
+use App\Core\Module\Session\Contracts\SessionStoreMigratorInterface;
 use App\Core\Module\Theme\Contracts\ThemeInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Enums\AppState;
@@ -206,16 +207,24 @@ class Kernel
      */
     private function migrateSessionStoreOnce(SessionInterface $session): void
     {
+        // Capability-проверка (п.3): миграция сторов — внутренняя механика
+        // Session, доступная через SessionStoreMigratorInterface; ядро не
+        // знает класс ModuleSession, а только опциональную способность.
+        if (!$this->container->has(SessionStoreMigratorInterface::class)) {
+            return;
+        }
+        $migrator = $this->container->get(SessionStoreMigratorInterface::class);
+
         $driver  = $session->driver();
         $storage = (string) $this->container->get('storage_path');
-        $marker  = $storage . '/.session_store.' . $driver;
+        $marker  = AppState::sessionStoreMarker($storage, $driver);
         if (is_file($marker)) {
             return;
         }
 
         $other = $driver === 'redis' ? 'file' : 'redis';
         try {
-            $moved = $session->migrateStore($other, $driver);
+            $moved = $migrator->migrateStore($other, $driver);
             @file_put_contents($marker, (string) time());
             if ($moved > 0 && $this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
                 $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)->info(
@@ -377,7 +386,7 @@ class Kernel
                 'Часовой пояс'             => (string) ($request->post['timezone'] ?? 'UTC'),
                 'Режим отладки'            => isset($request->post['debug']),
                 'Супер-администратор'      => \App\Core\System\Support\SuperAdmin::USERNAME . ' (пароль задан, хеш — в .env)',
-                '.env создан'              => is_file((string) $this->container->get('base_path') . '/.env'),
+                '.env создан'              => is_file((string) $this->container->get('env_path')),
             ];
             // Детали Database-шага (создание БД + развёртывание схемы db.sql), если install() их вернул.
             if (is_array($result)) {
@@ -624,26 +633,12 @@ class Kernel
         return new Response('<h1>' . $code . '</h1><p>' . $title . '</p>', $code);
     }
 
+    /**
+     * Детект состояния движка — делегация единому резолверу AppState::detect()
+     * (п.10: одна реализация, имена маркеров только в AppState::flagNames()).
+     */
     private function detectAppState(): AppState
     {
-        $storagePath = $this->container->get('storage_path');
-
-        if (!file_exists($storagePath . '/.installed')) {
-            return AppState::NotInstalled;
-        }
-        if (file_exists($storagePath . '/.installing')) {
-            return AppState::Installing;
-        }
-        if (file_exists($storagePath . '/.upgrading')) {
-            return AppState::Upgrading;
-        }
-        if (file_exists($storagePath . '/.maintenance')) {
-            return AppState::Maintenance;
-        }
-        if (file_exists($storagePath . '/.error')) {
-            return AppState::Error;
-        }
-
-        return AppState::Running;
+        return AppState::detect((string) $this->container->get('storage_path'));
     }
 }

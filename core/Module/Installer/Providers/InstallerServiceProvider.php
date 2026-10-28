@@ -19,7 +19,7 @@ use App\Core\System\Contracts\ModuleProviderInterface;
  * Провайдер модуля Installer.
  *
  * Зависимости (резолвятся лениво при первом обращении, п.3):
- * FileSystem, Security, Config, Logger + пути base_path/storage_path из контейнера (п.7).
+ * FileSystem, Security, Config, Logger + пути storage/env/logs/database из контейнера (п.7).
  * Отдаёт: InstallerInterface и InstallerPageInterface (один и тот же синглтон).
  */
 class InstallerServiceProvider implements ModuleProviderInterface
@@ -28,8 +28,11 @@ class InstallerServiceProvider implements ModuleProviderInterface
     {
         $container->bind(InstallerInterface::class, static function (ContainerInterface $c): Installer {
             return new Installer(
-                (string) $c->get('base_path'),
                 (string) $c->get('storage_path'),
+                // Пути — только из единой точки правды Paths::MAP (п.7):
+                // .env и каталог логов приходят ключами контейнера.
+                (string) $c->get('env_path'),
+                (string) $c->get('logs_path'),
                 $c->get(FileSystemInterface::class),
                 $c->get(SecurityInterface::class),
                 $c->get(ConfigRepositoryInterface::class),
