@@ -82,8 +82,13 @@ final class FileQueueDriver implements DriverInterface
             $p['visible_until'] = $now + max(5, $visibilitySeconds);
             $this->atomicWrite($target, $p);
             try {
+                // Десериализация только что провалидированного джоба; классы ограничены
+                // whitelisted-набором JobInterface — защита от POP-вектора (п.10 безопасности).
                 /** @var JobInterface $job */
-                $job = unserialize((string) $p['job'], ['allowed_classes' => true]);
+                $job = unserialize(
+                    (string) $p['job'],
+                    ['allowed_classes' => self::allowedJobClasses()]
+                );
             } catch (\Throwable) {
                 // повреждённый payload — не должен блокировать очередь
                 $this->toFailedRaw($target, 'unserialize failed');
@@ -101,6 +106,31 @@ final class FileQueueDriver implements DriverInterface
         }
 
         return null;
+    }
+
+    /**
+     * Whitelist классов для десериализации payload'ов очереди: реализации
+     * JobInterface проекта (скан один раз на процесс). Защита от POP-вектора:
+     * доступ к storage/queue не должен позволять инстанцировать произвольные классы.
+     *
+     * @return list<string>|true  true — если конкретных классов ещё нет (первый запуск);
+     *         чужие объекты всё равно отсекаются проверкой instanceof JobInterface ниже.
+     */
+    private static function allowedJobClasses(): array|true
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+
+        $allowed = [];
+        foreach (get_declared_classes() as $class) {
+            if (is_subclass_of($class, JobInterface::class)) {
+                $allowed[] = $class;
+            }
+        }
+
+        return $cache = ($allowed === []) ? true : $allowed;
     }
 
     /** Повреждённый reserved-файл -> failed/ с пояснением. */

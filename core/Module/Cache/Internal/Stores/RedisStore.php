@@ -44,7 +44,8 @@ final class RedisStore implements StoreInterface
         if ($raw === false || $raw === null) {
             return null;
         }
-        return unserialize((string) $raw);
+        // Безопасность: значения кэша — только данные, объекты запрещены (POP-вектор).
+        return unserialize((string) $raw, ['allowed_classes' => false]);
     }
 
     public function write(string $key, mixed $value, int $ttl): bool

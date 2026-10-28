@@ -47,7 +47,9 @@ final class FileStore implements StoreInterface
             @unlink($file); // просрочено — чистим проактивно
             return null;
         }
-        return unserialize($payload);
+        // Безопасность: из кэш-файлов разрешены только данные (массивы/скаляры),
+        // никаких объектов — исключаем POP-вектор десериализации.
+        return unserialize($payload, ['allowed_classes' => false]);
     }
 
     public function write(string $key, mixed $value, int $ttl): bool
@@ -88,7 +90,7 @@ final class FileStore implements StoreInterface
             return false;
         }
         // Отличаем «закешировано null» от «ключа нет»: read() вернул бы null в обоих случаях.
-        return unserialize($payload) !== null || $payload === serialize(null);
+        return unserialize($payload, ['allowed_classes' => false]) !== null || $payload === serialize(null);
     }
 
     public function delete(string $key): bool

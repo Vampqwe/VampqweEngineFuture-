@@ -84,12 +84,30 @@ abstract class AbstractMigration implements MigrationInterface
         return $this->sql("DROP TABLE {$table}");
     }
 
-    /** Идемпотентный хелпер: добавить колонку, если её ещё нет. */
+    /** Идемпотентный хелпер: добавить колонку, если её ещё нет (sqlite + mysql). */
     final protected function addColumnIfMissing(string $table, string $column, string $definition): int
     {
-        foreach ($this->db->select("PRAGMA table_info({$table})") as $col) {
-            if (($col['name'] ?? null) === $column) {
+        foreach ([$table, $column] as $identifier) {
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $identifier)) {
+                throw new RuntimeException("Модуль [Migration]: недопустимый идентификатор [{$identifier}].");
+            }
+        }
+
+        if ($this->db->driver() === 'mysql') {
+            // PRAGMA — диалект SQLite; в MySQL INFORMATION_SCHEMA (параметры через bindings).
+            $found = $this->db->selectOne(
+                'SELECT COUNT(*) AS c FROM information_schema.COLUMNS'
+                . ' WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+                [$table, $column]
+            );
+            if ((int) ($found['c'] ?? 0) > 0) {
                 return 0;
+            }
+        } else {
+            foreach ($this->db->select("PRAGMA table_info({$table})") as $col) {
+                if (($col['name'] ?? null) === $column) {
+                    return 0;
+                }
             }
         }
 

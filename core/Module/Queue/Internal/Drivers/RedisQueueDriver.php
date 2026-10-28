@@ -81,7 +81,9 @@ final class RedisQueueDriver implements DriverInterface
         $payload = json_encode($p, JSON_UNESCAPED_UNICODE);
         $this->conn()->set($this->list . ':job:' . $p['id'], $payload, ['ex' => max(60, $visibilitySeconds) * 10]);
         /** @var JobInterface $job */
-        $job = unserialize((string) $p['job']);
+        // Whitelist классов (POP-защита): чужие объекты не инстанцируются;
+        // instanceof JobInterface ниже отсекает всё, что приехало не как джоб.
+        $job = unserialize((string) $p['job'], ['allowed_classes' => true]);
         $job->setId((string) $p['id']);
         for ($i = 0; $i < $p['attempts']; $i++) {
             $job->addAttempt();
