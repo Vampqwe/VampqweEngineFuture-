@@ -78,15 +78,15 @@
 │   └── Module/      ← 19 модулей ядра: FileSystem, Parser, ArrayHelper, Hook, Config, Logger,
 │   │                   TimeDate, Exception, Error, Cache, Database, Security, Session, Template,
 │   │                   Queue, Migration, Theme, Doctor, Installer
-├── app/modules/     ← пользовательские модули (Pages, …) — тот же канон Contracts/Internal
+├── app/modules/     ← пользовательские модули (Pages, Auth, …) — тот же канон Contracts/Internal
 ├── config/          ← app.php, modules.php (манифест модулей, п.6)
 ├── view/            ← core_view (ошибки/установщик/админка) и app_view (темы мультисайта)
 ├── storage/         ← cache, sessions, queue + файлы-флаги состояния (.installed и др.)
 ├── logs/            ← логи по каналам: logs/<дата>/<Модуль>.log
 ├── database/        ← SQL-дампы схемы (db.sql)
 ├── migrations/      ← версии схемы БД (<ГГГГ_ММ_ДД_HHMMSS>_имя.php)
-├── tests/           ← собственный фреймворк + Unit (Container, Router, Security)
-├── bin/             ← CLI: php bin/engine doctor
+├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme)
+├── bin/             ← CLI: php bin/engine doctor | migrate | sites | site:add | test | lint-rules
 └── vendor/          ← только composer-автозагрузчик (никаких сторонних пакетов)
 ```
 
@@ -104,5 +104,15 @@ php -S localhost:8000 -t public public/router.php
 ```
 
 Windows: `start-dev.ps1` (уже передаёт router-скрипт) или `init.ps1` для первичной подготовки.
+
+## 🌐 Мультисайт (тема по домену)
+
+Один движок обслуживает несколько сайтов: домен запроса резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/_starter` (движок не падает).
+
+```bash
+php bin/engine migrate                      # создаёт таблицу engine_sites
+php bin/engine site:add shop.test animals   # домен -> тема (клон из _starter при первом запросе)
+php bin/engine sites                        # список сайтов реестра
+```
 
 📝 Лицензия: MIT
