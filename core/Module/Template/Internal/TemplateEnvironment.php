@@ -29,36 +29,43 @@ final class TemplateEnvironment
     /** @var string|null имя layout, объявленного через @extends */
     private ?string $layout = null;
 
-    /** @var array<string,string> секции, переданные из дочернего шаблона в layout */
-    private array $inheritedSections = [];
-
     /**
-     * Разделитель вызовов: true — этот env является «родительским» (тот, что
-     * объявил @extends). Дочерние env (создаваемые Template::renderFile для
-     * layout/partial) получают его равным false и обязаны вернуть захваченные
-     * секции наверх через pullSections() — иначе @yield в layout теряет контент.
+     * Флаг вложенного окружения: true для env, созданных childEnv() (@include).
+     * Такие окружения НЕ сбрасывают унаследованные секции при render().
      */
-    private bool $isRoot;
+    private bool $isNested = false;
 
     public function __construct(
         private readonly Compiler $compiler,
         private readonly Escaper $escaper,
         /** @var callable(string, array<string,mixed>): string рендер имени по текущему site/theme */
         private $nameRenderer,
-        bool $isRoot = true,
     ) {
-        $this->isRoot = $isRoot;
     }
 
     /**
-     * Секции, захваченные этим окружением (для переноса родителю после рендера
-     * layout/partial). Вызывается Template::renderFile после env->render().
-     *
-     * @return array<string,string>
+     * Создать дочернее окружение для @include: копия секций и данных, но
+     * СВОЙ layout — partial со случайным @extends не утянет родителя в цикл.
      */
-    public function pullSections(): array
+    public function childEnv(): self
     {
-        return $this->sections;
+        $child = new self($this->compiler, $this->escaper, $this->nameRenderer);
+        $child->share($this->shared);
+        $child->sections  = $this->sections;
+        $child->isNested  = true;
+        $child->fileLocator         = $this->fileLocator;
+        $child->compileFileDelegate = $this->compileFileDelegate;
+
+        return $child;
+    }
+
+    /**
+     * Создать окружение рендера layout-а: наследует СЕКЦИИ родителя (иначе
+     * @yield('content') теряет контент дочернего шаблона), но НЕ его layout.
+     */
+    public function layoutEnv(): self
+    {
+        return $this->childEnv();
     }
 
     public function share(array $globals): void
@@ -69,53 +76,77 @@ final class TemplateEnvironment
     /** Точка входа: отрендерить PHP-код скомпилированного шаблона. */
     public function render(string $compiledPhp, array $data): string
     {
-        // Вложенные окружения (layout/partial, создаваемые Template::renderFile)
-        // наследуют секции родителя — их нельзя сбрасывать, иначе @yield в layout
-        // потеряет контент дочернего шаблона (баг инсталлятора: пустые страницы).
-        if ($this->isRoot) {
+        // Вложенные рендеры (@include partial-ов через childEnv) наследуют
+        // секции родителя — их нельзя сбрасывать, иначе @yield в layout
+        // потеряет контент дочернего шаблона (баг инсталлятора: пустые
+        // страницы, видны только заголовки шагов).
+        if (!$this->isNested) {
             $this->reset();
-        } else {
-            $this->sections = array_merge($this->inheritedSections, $this->sections);
         }
 
         $output = $this->evaluate($compiledPhp, $data);
 
-        // Если этот env НЕ корневой (его создал Template::renderFile для
-        // layout/partial), то layout уже отрендерился внутри evaluate() через
-        // рекурсивный вызов nameRenderer -> render(). В этом случае секции,
-        // захваченные здесь, должны быть переданы родителю через pullSections().
-        if (!$this->isRoot) {
-            return $output;
-        }
-
-        // Корневой env: обрабатываем @extends двухпроходным рендером.
-        // Двухпроходный рендер: если шаблон объявил @extends('layout'),
-        // рендерим layout, вставляя наши секции. Цикл с защитой от 10 уровней
-        // наследования (layout может сам наследоваться от другого layout).
-        // Ключевой момент: дочерний шаблон мог ничего не вывести «в тело»
-        // (@yield пустой) — тогда выводом первого прохода и является content.
+        // Дочерний шаблон мог ничего не вывести «в тело» вне секций — тогда
+        // выводом первого прохода и является content (поддержка @show-стиля).
         if ($this->layout !== null && $this->sections === [] && trim($output) !== '') {
             $this->sections['content'] = $output;
         }
 
+        // Двухпроходный рендер @extends: если шаблон объявил layout,
+        // рендерим layout, вставляя наши секции. Layout исполняется в
+        // ДОЧЕРНЕМ env, который наследует СЕКЦИИ этого окружения — поэтому
+        // @yield('content') видит контент дочернего шаблона. Цикл с защитой
+        // от 10 уровней наследования (layout может сам наследоваться).
+        // (Прежняя схема «nameRenderer -> новый env без секций» теряла весь
+        // контент @section-блоков: баг пустых страниц установщика.)
         $depth = 0;
         while ($this->layout !== null && $depth++ < 10) {
             $layoutName = $this->layout;
-            // Секции наследуемого шаблона переносятся в layout: они не должны
-            // теряться при сбросе окружения (иначе @yield отдаст дефолт).
-            $inherited  = array_merge($this->inheritedSections, $this->sections);
-            $this->reset();
-            $this->inheritedSections = $inherited;
-            $this->sections          = $inherited;
+            $this->layout = null;
 
-            // Layout рендерится ВНУТРИ нового env (как partial), чтобы его @yield
-            // видел секции, которые мы передали выше. Но так как layout не должен
-            // создавать свой layout-цикл (он сам layout), we pass isRoot=false.
-            $layoutPhp = ($this->nameRenderer)($layoutName, []);
-            $output    = $this->evaluate($layoutPhp, $data);
+            $layoutFile = $this->locateFile($layoutName);
+            $layoutPhp  = $this->compileFile($layoutFile);
+
+            $env        = $this->layoutEnv();
+            $output     = $env->render($layoutPhp, $data);
+            $this->sections = $env->sections;   // секции переживают многоуровневый @extends
         }
 
         return $output;
+    }
+
+    /** Резолв имени шаблона в путь файла делегатом Template (fileLocator). */
+    private function locateFile(string $name): string
+    {
+        /** @var callable(string): string $locator — передаётся Template::environment() */
+        $locator = $this->fileLocator;
+
+        return $locator($name);
+    }
+
+    /** @var callable(string): string резолвер имени -> абсолютный путь файла */
+    private $fileLocator;
+
+    public function setFileLocator(callable $locator): void
+    {
+        $this->fileLocator = $locator;
+    }
+
+    /** Компиляция файла шаблона (с дисковым кэшем) — делегат Template. */
+    private function compileFile(string $file): string
+    {
+        /** @var callable(string): string $compilerDelegate — передаётся Template::environment() */
+        $compilerDelegate = $this->compileFileDelegate;
+
+        return $compilerDelegate($file);
+    }
+
+    /** @var callable(string): string компилятор "путь файла -> PHP-код" */
+    private $compileFileDelegate;
+
+    public function setCompileFile(callable $delegate): void
+    {
+        $this->compileFileDelegate = $delegate;
     }
 
     private function reset(): void
@@ -123,7 +154,6 @@ final class TemplateEnvironment
         $this->sections      = [];
         $this->sectionStack  = [];
         $this->layout        = null;
-        $this->inheritedSections = [];
     }
 
     private function evaluate(string $compiledPhp, array $data): string
