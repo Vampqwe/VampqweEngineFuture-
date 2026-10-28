@@ -121,6 +121,24 @@ final class ModuleBridge
         return $this->opt(PageRendererInterface::class);
     }
 
+    // ---------- константы контрактов (единственный легальный источник, R6b) ----------
+
+    /**
+     * Дефолтная тема (ThemeInterface::DEFAULT_THEME). Ядро и его support-классы
+     * обязаны использовать этот геттер, а не literal `XxxInterface::CONST` —
+     * иначе знание о модуле утекает за пределы моста (нарушение R6b).
+     */
+    public function defaultTheme(): string
+    {
+        return ThemeInterface::DEFAULT_THEME;
+    }
+
+    /** Область рендера «приложение» (TemplateInterface::SCOPE_APP). */
+    public function scopeApp(): string
+    {
+        return TemplateInterface::SCOPE_APP;
+    }
+
     // ---------- обязательные зависимости с fallback (п.9: не падать) ----------
 
     /** Страницы ошибок отдаёт модуль Error; без него — минимальный HTML-fallback. */

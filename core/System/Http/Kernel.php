@@ -3,10 +3,6 @@ declare(strict_types=1);
 
 namespace App\Core\System\Http;
 
-use App\Core\Module\Assets\Contracts\AssetsInterface;
-use App\Core\Module\Session\Contracts\SessionInterface;
-use App\Core\Module\Template\Contracts\TemplateInterface;
-use App\Core\Module\Theme\Contracts\ThemeInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Enums\AppState;
 use App\Core\System\Http\Middleware\CsrfProtect;
@@ -148,7 +144,7 @@ class Kernel
             return [];
         }
 
-        return [new CsrfProtect($session, $errors)];
+        return [new CsrfProtect($this->bridge)];
     }
 
     /** Middleware режима обслуживания — только если состояние Maintenance и Error доступен. */
@@ -159,7 +155,7 @@ class Kernel
             return [];
         }
 
-        return [new MaintenanceMode($errors, $state)];
+        return [new MaintenanceMode($this->bridge, $state)];
     }
 
     /**
@@ -199,7 +195,7 @@ class Kernel
     }
 
     /** Завершение запроса: сохранить сессию + выдать куку, если надо. */
-    private function finish(Response $response, ?SessionInterface $session): Response
+    private function finish(Response $response, ?object $session): Response
     {
         if ($session === null) {
             return $response;
@@ -222,7 +218,7 @@ class Kernel
      * Фоновая миграция хранилища сессий после смены session.driver.
      * Маркер — в storage/.session_store.<driver>; выполняется один раз на драйвер.
      */
-    private function migrateSessionStoreOnce(SessionInterface $session): void
+    private function migrateSessionStoreOnce(object $session): void
     {
         // Capability-проверка (п.3): миграция сторов — внутренняя механика
         // Session, доступная через отдельный контракт; ядро не знает ни
@@ -272,10 +268,10 @@ class Kernel
      * (best effort: без Theme-модуля/БД — только CORE-каскад). Отсутствующий
      * файл — 404 через модуль Error (п.9: не падать).
      */
-    private function assetResponse(Request $request, AssetsInterface $assets): Response
+    private function assetResponse(Request $request, object $assets): Response
     {
         [$theme, $domain] = $this->siteContext($request);
-        $assets->useContext($domain, $theme !== '' ? $theme : ThemeInterface::DEFAULT_THEME);
+        $assets->useContext($domain, $theme !== '' ? $theme : $this->bridge->defaultTheme());
 
         $file = $assets->serve(substr($request->path, strlen('/assets/')));
         if ($file === null) {
@@ -315,7 +311,7 @@ class Kernel
     }
 
     /**
-     * Мультисайт-контекст запроса: тема + домен сайта через ThemeInterface.
+     * Мультисайт-контекст запроса: тема + домен сайта через резолв Bridge.
      * Без Theme-модуля — прежняя эвристика поддомена (best effort, п.9).
      *
      * @return array{0: string, 1: ?string} [theme, domain]

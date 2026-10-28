@@ -8,8 +8,8 @@ use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Http\Kernel;
 use App\Core\System\Http\Request;
 use App\Core\System\Contracts\ModuleProviderInterface;
-use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\System\Support\EnvLoader;
+use App\Core\System\Support\ModuleBridge;
 use App\Core\System\Support\Paths;
 use RuntimeException;
 
@@ -36,11 +36,12 @@ class App
 
         // Хук «движок собран»: подписчики (будущие Auth/Pages/модули сайта)
         // могут регистрировать свои слушатели/маршруты в момент старта,
-        // не трогая ядро. Dispatch защищён: сбой подписчика не валит boot.
-        if ($this->container->has(\App\Core\Module\Hook\Contracts\HookInterface::class)) {
+        // не трогая ядро. Резолв Hook-модуля — через ModuleBridge (правило
+        // R6b: знание о контрактах модулей живёт только в мосту).
+        // Dispatch защищён: сбой подписчика не валит boot (п.9).
+        $hooks = (new ModuleBridge($this->container))->hooks();
+        if ($hooks !== null) {
             try {
-                /** @var \App\Core\Module\Hook\Contracts\HookInterface $hooks */
-                $hooks = $this->container->get(\App\Core\Module\Hook\Contracts\HookInterface::class);
                 $hooks->dispatch('engine.booted', $this->container);
             } catch (\Throwable) {
                 // Hook сам гасит ошибки слушателей; сюда попасть не должен —
@@ -128,11 +129,11 @@ class App
 
     public function run(): void
     {
-        // Часовой пояс и кодировка из конфигурации, а не из дефолтов PHP
+        // Часовой пояс и кодировка из конфигурации, а не из дефолтов PHP.
+        // Резолв Config-модуля — через ModuleBridge (правило R6b); без
+        // модуля честно продолжаем с UTC (п.9: boot/handle не падают).
         date_default_timezone_set(
-            (string) $this->container
-                ->get(ConfigRepositoryInterface::class)
-                ->get('app.timezone', 'UTC')
+            (string) (new ModuleBridge($this->container))->configValue('app.timezone', 'UTC')
         );
 
         $request = Request::createFromGlobals();
