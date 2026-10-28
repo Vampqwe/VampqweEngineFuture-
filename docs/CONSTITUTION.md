@@ -71,5 +71,10 @@ php bin/engine test         # поведение: все Unit-тесты
 php bin/engine doctor       # smoke: честная самодиагностика живого дерева
 ```
 
+Для детерминизма doctor в CI собирается sqlite-стенд из `.env.example`
+(`DB_DRIVER=sqlite`, `DB_SQLITE_ENABLED=true`, `DB_DATABASE_PATH=engine.sqlite`) —
+без реальных СУБД и секретов; локально достаточно `cp .env.example .env` и тех же
+трёх замен (или установки через `/install`).
+
 Любой ненулевой exit code блокирует merge. Таким образом, «зелёный CI ⇒
 соответствие Конституции» — свойство репозитория, а не надежда ревьюера.
