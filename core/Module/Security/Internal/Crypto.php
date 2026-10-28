@@ -55,5 +55,42 @@ final class Crypto
         return hash('sha256', $appKey, true);
     }
 
+    /**
+     * Cookie-safe вариант envelope: base64url(iv | tag | ciphertext) без MAGIC.
+     * Формат исторический — принадлежит модулю Session (значения уже лежат в
+     * куках браузеров), но криптопримитив здесь один (R10 Конституции).
+     */
+    public static function encryptUrl(string $plaintext, string $appKey): string
+    {
+        $iv  = random_bytes(self::IV_LEN);
+        $tag = '';
+        $ct  = openssl_encrypt(
+            $plaintext, self::CIPHER, self::aesKey($appKey),
+            OPENSSL_RAW_DATA, $iv, $tag, '', self::TAG_LEN
+        );
+        if ($ct === false) {
+            throw new \RuntimeException('Шифрование не удалось (openssl).');
+        }
+
+        return rtrim(strtr(base64_encode($iv . $tag . $ct), '+/', '-_'), '=');
+    }
+
+    /** Расшифровать payload формата encryptUrl(); null — битый/подделанный данные. */
+    public static function decryptUrl(string $payload, string $appKey): ?string
+    {
+        $std = strtr($payload, '-_', '+/');
+        $pad = strlen($std) % 4 === 0 ? '' : str_repeat('=', 4 - strlen($std) % 4);
+        $raw = base64_decode($std . $pad, true);
+        if ($raw === false || strlen($raw) < self::IV_LEN + self::TAG_LEN + 1) {
+            return null;
+        }
+        $iv  = substr($raw, 0, self::IV_LEN);
+        $tag = substr($raw, self::IV_LEN, self::TAG_LEN);
+        $ct  = substr($raw, self::IV_LEN + self::TAG_LEN);
+        $pt  = openssl_decrypt($ct, self::CIPHER, self::aesKey($appKey), OPENSSL_RAW_DATA, $iv, $tag);
+
+        return $pt === false ? null : $pt;
+    }
+
     private function __construct() {}
 }

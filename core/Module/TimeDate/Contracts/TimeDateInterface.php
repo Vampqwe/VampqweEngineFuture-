@@ -20,7 +20,7 @@ interface TimeDateInterface
     public function timestamp(): int;
 
     /** Парсить строку даты в DateTimeImmutable (ЧП из конфига, если не задан). */
-    public function parse(string $datetime, ?string $timezone = null): \DateTimeImmutable;
+    public function parse(string $datetime, ?string $timezone): \DateTimeImmutable;
 
     /** Отформатировать дату по PHP-шаблону ('Y-m-d H:i:s'). */
     public function format(\DateTimeInterface $date, string $format): string;

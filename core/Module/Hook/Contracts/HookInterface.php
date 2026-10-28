@@ -29,7 +29,7 @@ interface HookInterface
      * @param string|null $id       Необязательный идентификатор подписки
      *                              (для последующего снятия removeAction()).
      */
-    public function addAction(string $hook, callable $listener, int $priority = 10, ?string $id = null): void;
+    public function addAction(string $hook, callable $listener, int $priority, ?string $id): void;
 
     /** Снять подписку по имени хука и идентификатору. Возвращает true, если снята. */
     public function removeAction(string $hook, string $id): bool;
@@ -54,5 +54,5 @@ interface HookInterface
      * Снять ВСЕ подписки на хук (или все вообще, если $hook === null).
      * Полезно модулям при выключении/перезагрузке.
      */
-    public function removeAll(?string $hook = null): void;
+    public function removeAll(?string $hook): void;
 }

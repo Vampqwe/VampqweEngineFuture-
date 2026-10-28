@@ -36,10 +36,10 @@ interface AssetsInterface
      * $src — относительный путь внутри каскада ('css/admin.css') или внешний
      * URL (http(s)://...); $deps — handles-зависимости (гарантируется порядок).
      */
-    public function registerStyle(string $handle, string $src, array $deps = [], string $scope = self::SCOPE_THEME): void;
+    public function registerStyle(string $handle, string $src, array $deps, string $scope): void;
 
     /** Зарегистрировать скрипт (см. registerStyle). */
-    public function registerScript(string $handle, string $src, array $deps = [], string $scope = self::SCOPE_THEME): void;
+    public function registerScript(string $handle, string $src, array $deps, string $scope): void;
 
     /** Отменить регистрацию (тема может вытеснить core-стиль своим). */
     public function forget(string $handle): void;

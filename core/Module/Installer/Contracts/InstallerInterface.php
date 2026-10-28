@@ -19,7 +19,7 @@ interface InstallerInterface
      * @return array<string,string>|true  true — успех без деталей;
      *         массив «шаг => результат» — итог для UI/CLI (включая БД и схему).
      */
-    public function install(array $options = []): array|bool;
+    public function install(array $options): array|bool;
 
     /** Идёт ли установка сейчас (флаг storage/.installing)? */
     public function isInstalling(): bool;

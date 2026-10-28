@@ -20,7 +20,8 @@ interface SessionInterface
     /** Начать новую сессию (с перегенерацией id — защита от fixation). */
     public function start(): string;
 
-    public function get(string $key, mixed $default = null): mixed;
+    /** Значение по ключу; $default — что вернуть при отсутствии (вызывающий обязан передать явно). */
+    public function get(string $key, mixed $default): mixed;
 
     public function set(string $key, mixed $value): void;
 
@@ -52,20 +53,13 @@ interface SessionInterface
      */
     public function signedCookie(
         string $name,
-        ?string $value = null,
-        int $minutes = 120,
-        bool $encrypt = false,
-        array &$setCookieHeaders = []
+        ?string $value,
+        int $minutes,
+        bool $encrypt,
+        array &$setCookieHeaders
     ): ?string;
 
     /** Активный драйвер хранилища ('file'|'redis'). */
     public function driver(): string;
 
-    /**
-     * Мигрировать все живые сессии из одного стора в другой (файл<->редис).
-     * Используется ядром при обнаружении смены session.driver.
-     *
-     * @return int количество перенесённых сессий
-     */
-    public function migrateStore(string $fromDriver, string $toDriver): int;
 }
