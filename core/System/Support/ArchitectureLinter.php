@@ -23,7 +23,7 @@ use App\Core\System\Enums\AppState;
  *   Д о к а з а т е л ь с т в о  строится построчно: каждое правило
  *   имеет хотя бы один исполняемый детектор в этом классе либо тест
  *   в tests/. Карта доказательств (правило → чем проверяется):
- *     п.1 (ядро не знает бизнес-логику)  → R6, R8   + KernelBoundaryTest
+ *     п.1 (ядро не знает бизнес-логику)  → R6, R6b, R8 + KernelBoundaryTest
  *     п.2 (только контракты)             → R3, R6, R8, R9
  *     п.3 (DI, никаких глобалов)         → R2, R7, R10 + ContainerTest
  *     п.4 (хуки вместо правок ядра)      → HookTest, AssetsTest (dispatch-точки)
@@ -52,6 +52,11 @@ use App\Core\System\Enums\AppState;
  *      (core/Module/*, app/modules/*) в executable-коде — только на их
  *      Contracts/ (п.1/п.2). Разрешены: use-строки, PHPDoc, хук-строки
  *      ('engine.*'), service-ключи ('*_path').
+ *  R6b. СТРУКТУРНОЕ усиление R6: ссылки ядра на контракты модулей живут
+ *      ТОЛЬКО в Support\ModuleBridge (единственный мост «ядро→модули»).
+ *      Ни один другой файл core/System/** не содержит literal-ссылки
+ *      App\...\Module\<X>::class / App\modules\<X>::class даже внутри
+ *      use-строк и PHPDoc (ловится и «перенос знания» рефакторингом).
  *  R7. Пути проекта строятся только из Paths::MAP (п.7): запрещены
  *      BASE_PATH . '/...' и конкатенации '*_path' с литеральными
  *      сегментами вне MAP.
@@ -244,6 +249,21 @@ final class ArchitectureLinter
                         $violations[] = "R6 ядро ссылается на класс модуля [{$fqcn}] — {$rel}"
                             . ' (разрешены только контракты из CORE_ALLOWED_REFERENCES)';
                     }
+                }
+            }
+
+            // ---- R6b: знание о модулях — только в ModuleBridge (структурная теорема) ----
+            if (str_starts_with($rel, 'core/System/')
+                && $rel !== 'core/System/Support/ModuleBridge.php') {
+                if (preg_match_all(
+                    '/(?:App\\\\(?:Core\\\\)?Module|App\\\\modules)\\\\[A-Za-z0-9_\\\\]*?\\\\[A-Za-z0-9_]+(?=::class|;)/',
+                    $src,
+                    $mBridge
+                )) {
+                    $violations[] = "R6b ссылка на контракт модуля вне ModuleBridge — {$rel}: "
+                        . implode(', ', array_values(array_unique($mBridge[0])))
+                        . ' (единственный легальный мост ядро→модули: core/System/Support/ModuleBridge.php;'
+                        . ' перенесите резолв в Bridge)';
                 }
             }
 
