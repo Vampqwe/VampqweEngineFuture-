@@ -1,16 +1,16 @@
 <?php
 declare(strict_types=1);
 
-namespace App\Modules\Pages\Providers;
+namespace App\modules\Pages\Providers;
 
 use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\Error\Contracts\ErrorPageInterface;
 use App\Core\Module\Template\Contracts\TemplateInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Contracts\ModuleProviderInterface;
-use App\Modules\Pages\Contracts\PageRepositoryInterface;
-use App\Modules\Pages\PageController;
-use App\Modules\Pages\PageRepository;
+use App\modules\Pages\Contracts\PageRepositoryInterface;
+use App\modules\Pages\PageController;
+use App\modules\Pages\PageRepository;
 
 /**
  * Провайдер пользовательского модуля Pages (app/modules/Pages).

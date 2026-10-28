@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 
-namespace App\Modules\Pages;
+namespace App\modules\Pages;
 
 use App\Core\Module\Database\Contracts\DatabaseInterface;
-use App\Modules\Pages\Contracts\PageRepositoryInterface;
+use App\modules\Pages\Contracts\PageRepositoryInterface;
 use InvalidArgumentException;
 use RuntimeException;
 

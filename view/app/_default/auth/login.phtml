@@ -1,0 +1,18 @@
+@extends('layouts/site')
+@section('title') {{ $title }} @endsection
+@section('content')
+    <h1>{{ $title }}</h1>
+
+    @if(!empty($error))
+        <p style="color:#b91c1c">{{ $error }}</p>
+    @endif
+
+    <form method="post" action="/login">
+        <input type="hidden" name="_csrf" value="{{ $csrf ?? '' }}">
+        <p><input type="email" name="email" placeholder="Email" required></p>
+        <p><input type="password" name="password" placeholder="Пароль" required></p>
+        <p><button type="submit">Войти</button></p>
+    </form>
+
+    <p><a href="/register">Регистрация</a></p>
+@endsection

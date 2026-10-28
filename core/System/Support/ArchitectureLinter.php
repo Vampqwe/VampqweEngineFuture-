@@ -137,9 +137,11 @@ final class ArchitectureLinter
             return 'App\\Core\\Module\\' . implode('\\', array_slice($parts, 2));
         }
         if (($parts[0] ?? '') === 'app' && ($parts[1] ?? '') === 'modules') {
-            // Канон проекта: пользовательские модули живут в App\Modules\<X>
-            // (совпадает с фактическими namespace в app/modules/).
-            return 'App\\Modules\\' . implode('\\', array_slice($parts, 2));
+            // Канон проекта: пользовательские модули живут в app/modules/<X>
+            // и получают namespace строго по PSR-4 от префикса "App\":
+            // App\modules\<X>. Никаких явных префиксов в composer.json —
+            // регистр namespace обязан совпадать с именем папки на диске.
+            return 'App\\modules\\' . implode('\\', array_slice($parts, 2));
         }
         return null;
     }

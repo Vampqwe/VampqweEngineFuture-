@@ -1,12 +1,12 @@
 <?php
 declare(strict_types=1);
 
-namespace App\Modules\Pages;
+namespace App\modules\Pages;
 
 use App\Core\Module\Database\Contracts\DatabaseInterface;
 use App\Core\Module\Error\Contracts\ErrorPageInterface;
 use App\Core\Module\Template\Contracts\TemplateInterface;
-use App\Modules\Pages\Contracts\PageRepositoryInterface;
+use App\modules\Pages\Contracts\PageRepositoryInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
 

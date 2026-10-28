@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace App\Modules\Pages\Contracts;
+namespace App\modules\Pages\Contracts;
 
 /**
  * Контракт модуля Pages — единственная граница для остального движка.

@@ -1,0 +1,19 @@
+@extends('layouts/site')
+@section('title') {{ $title }} @endsection
+@section('content')
+    <h1>{{ $title }}</h1>
+
+    @if(!empty($error))
+        <p style="color:#b91c1c">{{ $error }}</p>
+    @endif
+
+    <form method="post" action="/register">
+        <input type="hidden" name="_csrf" value="{{ $csrf ?? '' }}">
+        <p><input type="text" name="name" placeholder="Имя"></p>
+        <p><input type="email" name="email" placeholder="Email" required></p>
+        <p><input type="password" name="password" placeholder="Пароль (от 8 символов)" required minlength="8"></p>
+        <p><button type="submit">Создать аккаунт</button></p>
+    </form>
+
+    <p><a href="/login">Уже есть аккаунт? Войти</a></p>
+@endsection

@@ -72,12 +72,26 @@ class Kernel
         ));
         $userRouter->get('/', fn(Request $r): Response => $this->homeResponse($r));
 
+        // Авторизация (модуль Auth, app/modules): /login, /register, /logout.
+        // Подключается ТОЛЬКО при наличии публичного контракта модуля — ядро
+        // не знает реализации (п.2). Регистрация ДО /{slug}, чтобы системные
+        // слаги auth-дороги не перехватывались страницами контента.
+        if ($this->container->has(\App\modules\Auth\Contracts\AuthManagerInterface::class)) {
+            /** @var \App\modules\Auth\Contracts\AuthManagerInterface $auth */
+            $auth = $this->container->get(\App\modules\Auth\Contracts\AuthManagerInterface::class);
+            $userRouter->get('/login', fn(Request $r): Response => $auth->showLogin($r));
+            $userRouter->post('/login', fn(Request $r): Response => $auth->login($r));
+            $userRouter->get('/register', fn(Request $r): Response => $auth->showRegister($r));
+            $userRouter->post('/register', fn(Request $r): Response => $auth->register($r));
+            $userRouter->post('/logout', fn(Request $r): Response => $auth->logout($r));
+        }
+
         // Страницы контента (модуль Pages, app/modules): /{slug} отдаёт
         // опубликованную страницу через тему сайта. Подключается ТОЛЬКО если
         // модуль зарегистрирован — ядро не жёстко зависит от приложения (п.2).
-        if ($this->container->has(\App\Modules\Pages\PageController::class)) {
-            /** @var \App\Modules\Pages\PageController $pages */
-            $pages = $this->container->get(\App\Modules\Pages\PageController::class);
+        if ($this->container->has(\App\modules\Pages\PageController::class)) {
+            /** @var \App\modules\Pages\PageController $pages */
+            $pages = $this->container->get(\App\modules\Pages\PageController::class);
             $userRouter->get('/{slug}', fn(Request $r): Response => $pages->show($r));
         }
 
