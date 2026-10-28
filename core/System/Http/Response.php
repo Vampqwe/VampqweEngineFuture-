@@ -14,6 +14,31 @@ class Response
         private array $headers = ['Content-Type' => 'text/html; charset=utf-8']
     ) {}
 
+    /** Тело ответа (для тестов и внутреннего использования). */
+    public function body(): string
+    {
+        return $this->body;
+    }
+
+    public function statusCode(): int
+    {
+        return $this->statusCode;
+    }
+
+    /** @return array<string,string> */
+    public function headers(): array
+    {
+        return $this->headers;
+    }
+
+    /** Копия ответа с дополнительным/заменённым заголовком. */
+    public function withHeader(string $name, string $value): self
+    {
+        $clone = clone $this;
+        $clone->headers[$name] = $value;
+        return $clone;
+    }
+
     /** Добавить Cookie (значение уже собрано модулем Session). */
     public function withCookie(string $setCookieHeader): self
     {
