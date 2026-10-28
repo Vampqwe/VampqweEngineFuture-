@@ -1,0 +1,33 @@
+@extends('layouts/admin')
+@section('title') {{ $title }} @endsection
+@section('content')
+<h1>Пользователи <span style="font-size:13px;color:#9aa3b5">(всего: {{ $total ?? 0 }})</span></h1>
+
+@if(($users ?? []) === [])
+  <p style="color:#9aa3b5">Зарегистрированных пользователей пока нет.</p>
+@else
+  <table>
+    <tr><th>#</th><th>Email</th><th>Имя</th><th>Роль</th><th>Регистрация</th><th>Сменить роль</th></tr>
+    @foreach($users as $u)
+      <tr>
+        <td>{{ $u['id'] }}</td>
+        <td>{{ $u['email'] }}</td>
+        <td>{{ $u['name'] ?? '—' }}</td>
+        <td><code>{{ $u['role'] ?? 'user' }}</code></td>
+        <td>{{ $u['created_at'] ?? '—' }}</td>
+        <td>
+          <form method="post" action="/admin/users/role/{{ $u['id'] }}" style="display:flex;gap:6px">
+            <input type="hidden" name="_csrf" value="{{ $csrf ?? '' }}">
+            <select name="role" style="width:auto">
+              @foreach(['user', 'admin', 'super_administrator'] as $r)
+                <option value="{{ $r }}" {{ ($u['role'] ?? 'user') === $r ? 'selected' : '' }}>{{ $r }}</option>
+              @endforeach
+            </select>
+            <button class="btn" type="submit">OK</button>
+          </form>
+        </td>
+      </tr>
+    @endforeach
+  </table>
+@endif
+@endsection

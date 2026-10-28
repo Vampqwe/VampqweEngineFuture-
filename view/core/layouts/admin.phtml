@@ -1,0 +1,64 @@
+<!doctype html>
+{{-- Layout админ-панели: системная зона view/core/admin/ (п.3 Конституции).
+     НЕ зависит от темы сайта: $adminNav публикует AdminController из реестра
+     разделов; активный пункт — по общей префиксной ссылке ($adminPath). --}}
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ $title ?? 'Панель' }} — {{ $appName }}</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #12141a; color: #e6e9f0; min-height: 100vh; }
+  .wrap { display: flex; min-height: 100vh; }
+  nav { width: 230px; background: #171a22; border-right: 1px solid #2c3040;
+    padding: 18px 12px; flex-shrink: 0; }
+  nav .brand { font-size: 14px; font-weight: 700; color: #a9c7ff; padding: 6px 10px 16px; }
+  nav a { display: block; padding: 9px 12px; border-radius: 8px; color: #c3cadb;
+    text-decoration: none; font-size: 14px; margin-bottom: 2px; }
+  nav a:hover { background: #20263a; color: #fff; }
+  nav a.active { background: #24304d; color: #a9c7ff; }
+  main { flex: 1; padding: 26px 32px; max-width: 1100px; }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #262b3d; }
+  th { color: #9aa3b5; font-weight: 600; font-size: 12px; }
+  a { color: #a9c7ff; }
+  .btn { display: inline-block; padding: 8px 16px; border: 0; border-radius: 8px;
+    background: #3f6ad8; color: #fff; font-size: 14px; cursor: pointer; text-decoration: none; }
+  .btn:hover { background: #4f7ae8; }
+  .btn.danger { background: #8a2f3a; } .btn.danger:hover { background: #a33a47; }
+  input, select, textarea { width: 100%; padding: 9px 11px; border-radius: 8px; font-size: 14px;
+    background: #10121a; color: #e6e9f0; border: 1px solid #333a52; font-family: inherit; }
+  textarea { min-height: 260px; resize: vertical; }
+  label { display: block; font-size: 12px; color: #9aa3b5; margin: 14px 0 4px; }
+  .errbox { background: #241a1e; border: 1px solid #5c2a31; border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 14px; color: #ff8f8f; font-size: 13px; }
+  .ok { color: #7fd6a1; } .fail { color: #ff8f8f; }
+  .cards { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+  .card { background: #1b1e27; border: 1px solid #2c3040; border-radius: 12px;
+    padding: 16px 20px; min-width: 160px; }
+  .card b { font-size: 24px; color: #a9c7ff; display: block; }
+  .card span { font-size: 12px; color: #9aa3b5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="brand">{{ $appName }} · панель</div>
+    @foreach(($adminNav ?? []) as $item)
+      <a href="{{ $item['href'] }}"
+         class="{{ str_starts_with($adminPath ?? '/', $item['href']) ? 'active' : '' }}">
+        {{ $item['icon'] }} {{ $item['title'] }}
+      </a>
+    @endforeach
+    <a href="/admin/logout" style="margin-top:24px;color:#ff8f8f">↩ Выход</a>
+  </nav>
+  <main>
+    @yield('content')
+  </main>
+</div>
+</body>
+</html>

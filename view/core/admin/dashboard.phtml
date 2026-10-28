@@ -1,0 +1,26 @@
+@extends('layouts/admin')
+@section('title') {{ $title }} @endsection
+@section('content')
+<h1>📊 Дашборд</h1>
+
+@if(($stats ?? []) !== [])
+  <div class="cards">
+    @foreach($stats as $s)
+      <div class="card"><b>{{ $s['value'] }}</b><span>{{ $s['label'] }}</span></div>
+    @endforeach
+  </div>
+@endif
+
+<h2 style="font-size:15px;color:#c3cadb;margin:18px 0 8px">Разделы панели</h2>
+<table>
+  <tr><th>Раздел</th><th>Переход</th></tr>
+  @foreach(($adminNav ?? []) as $item)
+    @if($item['href'] !== '/admin')
+      <tr>
+        <td>{{ $item['icon'] }} {{ $item['title'] }}</td>
+        <td><a class="btn" href="{{ $item['href'] }}">Открыть →</a></td>
+      </tr>
+    @endif
+  @endforeach
+</table>
+@endsection
