@@ -9,6 +9,7 @@ use App\Core\Module\Hook\Contracts\HookInterface;
 use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
+use App\Core\Module\Theme\Contracts\ThemeInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Enums\AppState;
 use App\Core\System\Support\Router;
@@ -120,11 +121,13 @@ class Kernel
         }
 
         // Страницы контента (модуль Pages, app/modules): /{slug} отдаёт
-        // опубликованную страницу через тему сайта. Подключается ТОЛЬКО если
-        // модуль зарегистрирован — ядро не жёстко зависит от приложения (п.2).
-        if ($this->container->has(\App\modules\Pages\PageController::class)) {
-            /** @var \App\modules\Pages\PageController $pages */
-            $pages = $this->container->get(\App\modules\Pages\PageController::class);
+        // опубликованную страницу через публичный HTTP-контракт модуля
+        // PageRendererInterface — ядро НЕ знает PageController (п.1: удаление
+        // или переименование класса приложения не касается ядра; дорога
+        // подключается только если провайдер забиндил контракт).
+        if ($this->container->has(\App\modules\Pages\Contracts\PageRendererInterface::class)) {
+            /** @var \App\modules\Pages\Contracts\PageRendererInterface $pages */
+            $pages = $this->container->get(\App\modules\Pages\Contracts\PageRendererInterface::class);
             $userRouter->get('/{slug}', fn(Request $r): Response => $pages->show($r));
         }
 
@@ -272,7 +275,7 @@ class Kernel
             $site   = $themes->site();
             $domain = $site['domain'] ?? null;
         }
-        $assets->useContext($domain, $theme !== '' ? $theme : \App\Core\Module\Theme\Theme::DEFAULT_THEME);
+        $assets->useContext($domain, $theme !== '' ? $theme : ThemeInterface::DEFAULT_THEME);
 
         $file = $assets->serve(substr($request->path, strlen('/assets/')));
         if ($file === null) {
@@ -344,15 +347,16 @@ class Kernel
             return new Response($pages->requirementsPage($installer->requirements()), 200);
         }
 
-        // Шаг 2: форма настроек
+        // Шаг 2: форма настроек. Валидация — через контракт InstallerInterface
+        // (п.2): ядро не знает конкретный класс Installer (правило R6).
         if ($path === '/install/settings' && $method === 'POST') {
-            $errors = \App\Core\Module\Installer\Installer::validateSettings($request->post);
+            $errors = $installer->validateSettings($request->post);
             return new Response($pages->settingsForm($errors), $errors === [] ? 200 : 422);
         }
 
         // Шаг 3: выполнение установки
         if ($path === '/install/run' && $method === 'POST') {
-            $errors = \App\Core\Module\Installer\Installer::validateSettings($request->post);
+            $errors = $installer->validateSettings($request->post);
             if ($errors !== []) {
                 return new Response($pages->settingsForm($errors), 422);
             }
@@ -470,7 +474,7 @@ class Kernel
             if ($this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
                 /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
                 $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
-                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : \App\Core\Module\Theme\Theme::DEFAULT_THEME);
+                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : ThemeInterface::DEFAULT_THEME);
                 $assets->registerStyle('site', 'css/site.css');
                 $assets->registerScript('site', 'js/site.js');
                 $views->share('assetsStyles', $assets->styles());

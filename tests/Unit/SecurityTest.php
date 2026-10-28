@@ -10,6 +10,11 @@ use Tests\Framework\TestCase;
 /**
  * Криптография ядра: пароли (argon2id), токены, AES-шифрование.
  * Security — фундамент Auth и подписанных cookies.
+ *
+ * @constitution-exception п.2 — юнит-тест внутренностей модулей: PhpArrayParser
+ * (Config\Internal) подставляется напрямую, чтобы не тащить весь boot-конвейер
+ * ради изоляции криптографии. Запись в TEST_INTERNAL_WHITELIST линтера (R9);
+ * аннотация обязательна, иначе exemption считается устаревшим.
  */
 final class SecurityTest extends TestCase
 {

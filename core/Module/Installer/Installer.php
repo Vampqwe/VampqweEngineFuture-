@@ -343,8 +343,13 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         return null;
     }
 
-    /** Валидация POST-настроек; пустой массив — всё корректно. */
-    public static function validateSettings(array $post): array
+    /**
+     * Валидация POST-настроек; пустой массив — всё корректно.
+     * НЕ static: контракт InstallerInterface объявляет метод экземпляром
+     * (PHP запрещает сужать не-static метода контракта до static), а чистая
+     * валидация данных — свойство хорошей абстракции, не компромисс.
+     */
+    public function validateSettings(array $post): array
     {
         $errors = [];
 
