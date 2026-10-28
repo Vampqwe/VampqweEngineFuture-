@@ -3,22 +3,37 @@ declare(strict_types=1);
 
 namespace App\Core\System\Http;
 
-use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
-use App\Core\Module\Error\Contracts\ErrorPageInterface;
-use App\Core\Module\Hook\Contracts\HookInterface;
-use App\Core\Module\Installer\Contracts\InstallerInterface;
-use App\Core\Module\Installer\Contracts\InstallerPageInterface;
+use App\Core\Module\Assets\Contracts\AssetsInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
+use App\Core\Module\Template\Contracts\TemplateInterface;
 use App\Core\Module\Theme\Contracts\ThemeInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Enums\AppState;
+use App\Core\System\Http\Middleware\CsrfProtect;
+use App\Core\System\Http\Middleware\MaintenanceMode;
+use App\Core\System\Support\KernelDispatcher;
+use App\Core\System\Support\ModuleBridge;
 use App\Core\System\Support\Router;
+use App\Core\System\Support\SuperAdmin;
 
+/**
+ * HTTP-конвейер ядра. Знание о модулях — ТОЛЬКО через ModuleBridge (п.1/п.2,
+ * правило R6b линтера): в executable-коде этого файла нет ни одной ссылки
+ * `App\...\Module\<X>::class` / `App\modules\<X>::class`. Ядро оркестрирует
+ * состояния, дороги и хуки; реализации живут за контрактами.
+ *
+ * Декомпозиция SRP: рендер главной страницы вынесен в KernelDispatcher,
+ * резолв мультисайт-контекста — в siteContext(). handle() = конвейер.
+ */
 class Kernel
 {
+    private readonly ModuleBridge $bridge;
+
     public function __construct(
         private readonly ContainerInterface $container
-    ) {}
+    ) {
+        $this->bridge = new ModuleBridge($container);
+    }
 
     public function handle(Request $request): Response
     {
@@ -26,9 +41,7 @@ class Kernel
 
         // Session: ленивое жизненное пространство запроса. Резолвим только когда
         // модуль доступен (до установки его нет — и это нормально).
-        $session = $this->container->has(SessionInterface::class)
-            ? $this->container->get(SessionInterface::class)
-            : null;
+        $session = $this->bridge->session();
 
         if ($session !== null) {
             // Однократная фоновая миграция file<->redis при СМЕНЕ session.driver:
@@ -38,11 +51,10 @@ class Kernel
 
         // П.4 Конституции: модули/темы регистрируют ассеты через хук-действие
         // без правки движка (после boot контейнер уже содержит Hook + Assets).
-        if ($this->container->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
-            && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
-            $this->container->get(\App\Core\Module\Hook\Contracts\HookInterface::class)
-                ->dispatch('engine.assets.registered',
-                    $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class));
+        $hooks  = $this->bridge->hooks();
+        $assets = $this->bridge->assets();
+        if ($hooks !== null && $assets !== null) {
+            $hooks->dispatch('engine.assets.registered', $assets);
         }
 
         // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
@@ -54,11 +66,8 @@ class Kernel
         // Статика (модуль Assets): /assets/<path> раздаётся PHP из каскада
         // site-sandbox -> theme -> core ДО проверки состояния — инсталлятору
         // и страницам ошибок свои CSS нужны и в NotInstalled/Maintenance.
-        // До установки Theme/Database нет — контекст выставит сам assetResponse
-        // best-effort (без него работает только CORE-каскад).
-        if (str_starts_with($request->path, '/assets/')
-            && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
-            return $this->finish($this->assetResponse($request), $session);
+        if (str_starts_with($request->path, '/assets/') && $assets !== null) {
+            return $this->finish($this->assetResponse($request, $assets), $session);
         }
 
         // Для состояний вне Running отдаём служебные страницы,
@@ -69,7 +78,7 @@ class Kernel
 
         // Обычная маршрутизация: две «дороги» — системная и пользовательская.
         // Системная дорога (/system/*, /admin/*, /api/system/*) — маршруты ядра.
-        $systemRouter = new Router($this->globalMiddleware($request));
+        $systemRouter = new Router($this->globalMiddleware());
         $systemRouter->get('/system/health', fn(Request $r): Response => $this->healthResponse($r));
 
         $handler = $systemRouter->match($request->method, $request->path);
@@ -84,52 +93,12 @@ class Kernel
 
         // Пользовательская дорога (/, /blog/*, ...) со своими глобальными middleware.
         $userRouter = new Router(array_merge(
-            $this->globalMiddleware($request),
-            [new \App\Core\System\Http\Middleware\MaintenanceMode(
-                $this->container->get(ErrorPageInterface::class),
-                $state
-            )],
+            $this->globalMiddleware(),
+            $this->maintenanceMiddleware($state),
         ));
         $userRouter->get('/', fn(Request $r): Response => $this->homeResponse($r));
 
-        // Авторизация (модуль Auth, app/modules): /login, /register, /logout.
-        // Подключается ТОЛЬКО при наличии публичного контракта модуля — ядро
-        // не знает реализации (п.2). Регистрация ДО /{slug}, чтобы системные
-        // слаги auth-дороги не перехватывались страницами контента.
-        if ($this->container->has(\App\modules\Auth\Contracts\AuthManagerInterface::class)) {
-            /** @var \App\modules\Auth\Contracts\AuthManagerInterface $auth */
-            $auth = $this->container->get(\App\modules\Auth\Contracts\AuthManagerInterface::class);
-            $userRouter->get('/login', fn(Request $r): Response => $auth->showLogin($r));
-            $userRouter->post('/login', fn(Request $r): Response => $auth->login($r));
-            $userRouter->get('/register', fn(Request $r): Response => $auth->showRegister($r));
-            $userRouter->post('/register', fn(Request $r): Response => $auth->register($r));
-            $userRouter->post('/logout', fn(Request $r): Response => $auth->logout($r));
-        }
-
-        // Панель администратора (СИСТЕМНЫЙ модуль Admin, core/Module/Admin): ВСЯ дорога
-        // /admin/* делегируется одному контракту AdminPanelInterface — ядро
-        // не знает маршрутов/разделов/шаблонов панели (п.2). Регистрация ДО
-        // /{slug}: '/admin' и любой хвост /admin/pages/edit/5 перехватываются
-        // панелью раньше контентных страниц; Guard внутри facade проверяется
-        // до маршрутизации по разделам.
-        if ($this->container->has(\App\Core\Module\Admin\Contracts\AdminPanelInterface::class)) {
-            /** @var \App\Core\Module\Admin\Contracts\AdminPanelInterface $admin */
-            $admin = $this->container->get(\App\Core\Module\Admin\Contracts\AdminPanelInterface::class);
-            $adminRoute = fn(Request $r): Response => $admin->dispatch($r);
-            $userRouter->any('/admin', $adminRoute);
-            $userRouter->any('/admin/{tail*}', $adminRoute);
-        }
-
-        // Страницы контента (модуль Pages, app/modules): /{slug} отдаёт
-        // опубликованную страницу через публичный HTTP-контракт модуля
-        // PageRendererInterface — ядро НЕ знает PageController (п.1: удаление
-        // или переименование класса приложения не касается ядра; дорога
-        // подключается только если провайдер забиндил контракт).
-        if ($this->container->has(\App\modules\Pages\Contracts\PageRendererInterface::class)) {
-            /** @var \App\modules\Pages\Contracts\PageRendererInterface $pages */
-            $pages = $this->container->get(\App\modules\Pages\Contracts\PageRendererInterface::class);
-            $userRouter->get('/{slug}', fn(Request $r): Response => $pages->show($r));
-        }
+        $this->registerModuleRoutes($userRouter);
 
         $handler = $userRouter->match($request->method, $request->path);
 
@@ -140,9 +109,7 @@ class Kernel
         // Хук-шина движка (модуль Hook): перед выполнением пользовательского
         // обработчика прогоняем запрос через фильтр — будущие модули (Auth,
         // Pages, ImportExport) смогут подменить/обработать запрос без правки ядра.
-        if ($this->container->has(HookInterface::class)) {
-            /** @var HookInterface $hooks */
-            $hooks = $this->container->get(HookInterface::class);
+        if ($hooks !== null) {
             $preempted = $hooks->applyFilters('engine.request', null, $request, $this->container);
             if ($preempted instanceof Response) {
                 return $this->finish($preempted, $session);
@@ -152,10 +119,11 @@ class Kernel
         $response = $handler($request);
 
         // Пост-фильтр ответа (расширение без вторжения в ядро).
-        if ($this->container->has(HookInterface::class)) {
-            /** @var HookInterface $hooks */
-            $hooks = $this->container->get(HookInterface::class);
-            $response = $hooks->applyFilters('engine.response', $response, $request);
+        if ($hooks !== null) {
+            $filtered = $hooks->applyFilters('engine.response', $response, $request);
+            if ($filtered instanceof Response) {
+                $response = $filtered;
+            }
         }
 
         return $this->finish($response, $session);
@@ -165,16 +133,69 @@ class Kernel
      * Глобальные middleware обеих дорог (п.4 Конституции): CSRF-защита.
      * Подключается только если доступны Session и Error (после установки).
      */
-    private function globalMiddleware(Request $request): array
+    private function globalMiddleware(): array
     {
-        if (!$this->container->has(SessionInterface::class)) {
+        if (!$this->bridge->hasErrorPages()) {
+            return [];
+        }
+        $session = $this->bridge->session();
+        if ($session === null) {
             return [];
         }
 
-        return [new \App\Core\System\Http\Middleware\CsrfProtect(
-            $this->container->get(SessionInterface::class),
-            $this->container->get(ErrorPageInterface::class),
-        )];
+        $errors = $this->bridge->errorPages();
+        if ($errors === null) {
+            return [];
+        }
+
+        return [new CsrfProtect($session, $errors)];
+    }
+
+    /** Middleware режима обслуживания — только если состояние Maintenance и Error доступен. */
+    private function maintenanceMiddleware(AppState $state): array
+    {
+        $errors = $this->bridge->errorPages();
+        if ($state !== AppState::Maintenance || $errors === null) {
+            return [];
+        }
+
+        return [new MaintenanceMode($errors, $state)];
+    }
+
+    /**
+     * Регистрация дорог модулей-контрактов (п.1: удаление/переименование
+     * модуля приложения не касается ядра — просто нет bind'а, просто нет дороги).
+     */
+    private function registerModuleRoutes(Router $userRouter): void
+    {
+        // Авторизация (модуль Auth, app/modules): /login, /register, /logout.
+        // Регистрация ДО /{slug}, чтобы системные слаги auth-дороги не
+        // перехватывались страницами контента.
+        $auth = $this->bridge->authManager();
+        if ($auth !== null) {
+            $userRouter->get('/login', fn(Request $r): Response => $auth->showLogin($r));
+            $userRouter->post('/login', fn(Request $r): Response => $auth->login($r));
+            $userRouter->get('/register', fn(Request $r): Response => $auth->showRegister($r));
+            $userRouter->post('/register', fn(Request $r): Response => $auth->register($r));
+            $userRouter->post('/logout', fn(Request $r): Response => $auth->logout($r));
+        }
+
+        // Панель администратора (СИСТЕМНЫЙ модуль Admin): ВСЯ дорога /admin/*
+        // делегируется контракту AdminPanelInterface — ядро не знает
+        // маршрутов/разделов/шаблонов панели (п.2). Регистрация ДО /{slug}.
+        $admin = $this->bridge->adminPanel();
+        if ($admin !== null) {
+            $adminRoute = fn(Request $r): Response => $admin->dispatch($r);
+            $userRouter->any('/admin', $adminRoute);
+            $userRouter->any('/admin/{tail*}', $adminRoute);
+        }
+
+        // Страницы контента (модуль Pages, app/modules): /{slug} отдаёт
+        // опубликованную страницу через публичный HTTP-контракт модуля.
+        $pages = $this->bridge->pageRenderer();
+        if ($pages !== null) {
+            $userRouter->get('/{slug}', fn(Request $r): Response => $pages->show($r));
+        }
     }
 
     /** Завершение запроса: сохранить сессию + выдать куку, если надо. */
@@ -191,10 +212,7 @@ class Kernel
             }
         } catch (\Throwable $e) {
             // сессия не должна ронять ответ — пишем в лог и продолжаем
-            if ($this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
-                $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)
-                    ->error('Session save failed: ' . $e->getMessage(), ['channel' => 'Session']);
-            }
+            $this->bridge->log('error', 'Session save failed: ' . $e->getMessage(), ['channel' => 'Session']);
         }
 
         return $response;
@@ -206,22 +224,27 @@ class Kernel
      */
     private function migrateSessionStoreOnce(SessionInterface $session): void
     {
+        // Capability-проверка (п.3): миграция сторов — внутренняя механика
+        // Session, доступная через отдельный контракт; ядро не знает ни
+        // ModuleSession, ни имён сторов — только способность (через Bridge).
+        $migrator = $this->bridge->storeMigrator();
+        if ($migrator === null) {
+            return;
+        }
+
         $driver  = $session->driver();
-        $storage = (string) $this->container->get('storage_path');
-        $marker  = $storage . '/.session_store.' . $driver;
+        $storage = $this->bridge->path('storage_path');
+        $marker  = AppState::sessionStoreMarker($storage, $driver);
         if (is_file($marker)) {
             return;
         }
 
         $other = $driver === 'redis' ? 'file' : 'redis';
         try {
-            $moved = $session->migrateStore($other, $driver);
+            $moved = $migrator->migrateStore($other, $driver);
             @file_put_contents($marker, (string) time());
-            if ($moved > 0 && $this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
-                $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)->info(
-                    "Миграция сессий {$other} -> {$driver}: перенесено {$moved}",
-                    ['channel' => 'Session']
-                );
+            if ($moved > 0) {
+                $this->bridge->log('info', "Миграция сессий {$other} -> {$driver}: перенесено {$moved}", ['channel' => 'Session']);
             }
         } catch (\Throwable) {
             // недоступный стор-источник — миграция не нужна, помечаем выполненной
@@ -229,20 +252,10 @@ class Kernel
         }
     }
 
-    /**
-     * Служебные страницы отдаёт модуль Error (контракт ErrorPageInterface).
-     * Если модуль недоступен (ранний бутстрап) — минимальный fallback.
-     */
+    /** Служебные страницы формирует модуль Error (через Bridge); fallback — минимальный HTML. */
     private function errorPage(int $code, ?\Throwable $e = null): Response
     {
-        if ($this->container->has(ErrorPageInterface::class)) {
-            return new Response(
-                $this->container->get(ErrorPageInterface::class)->render($code, $e),
-                $code
-            );
-        }
-
-        return new Response('<h1>Ошибка: ' . $code . '</h1>', $code);
+        return new Response($this->bridge->errorPage($code, $e), $code);
     }
 
     private function isSystemPath(string $path): bool
@@ -259,22 +272,9 @@ class Kernel
      * (best effort: без Theme-модуля/БД — только CORE-каскад). Отсутствующий
      * файл — 404 через модуль Error (п.9: не падать).
      */
-    private function assetResponse(Request $request): Response
+    private function assetResponse(Request $request, AssetsInterface $assets): Response
     {
-        /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
-        $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
-
-        // Контекст запроса для каскада: тема сайта + домен из реестра (мультисайт).
-        $theme  = '';
-        $domain = null;
-        if ($this->container->has(\App\Core\Module\Theme\Contracts\ThemeInterface::class)) {
-            /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
-            $themes = $this->container->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
-            $host   = strtolower((string) ($request->header('host') ?? ''));
-            $theme  = $themes->resolveForRequest($host);
-            $site   = $themes->site();
-            $domain = $site['domain'] ?? null;
-        }
+        [$theme, $domain] = $this->siteContext($request);
         $assets->useContext($domain, $theme !== '' ? $theme : ThemeInterface::DEFAULT_THEME);
 
         $file = $assets->serve(substr($request->path, strlen('/assets/')));
@@ -286,7 +286,7 @@ class Kernel
         // Условный запрос (If-None-Match / If-Modified-Since) -> 304 без тела:
         // max-age 86400 + ревалидация = мгновенная раздача после изменения файла
         // (?v= в URL тоже ломает кэш, см. AssetsRegistry::url).
-        $etag = '"' . md5($file['body']) . '"';
+        $etag  = '"' . md5($file['body']) . '"';
         $mtime = is_file($file['path']) ? (int) filemtime($file['path']) : time();
         $headers = [
             'Content-Type'  => $file['mime'],
@@ -314,6 +314,26 @@ class Kernel
             ->withHeader('Last-Modified', $headers['Last-Modified']);
     }
 
+    /**
+     * Мультисайт-контекст запроса: тема + домен сайта через ThemeInterface.
+     * Без Theme-модуля — прежняя эвристика поддомена (best effort, п.9).
+     *
+     * @return array{0: string, 1: ?string} [theme, domain]
+     */
+    private function siteContext(Request $request): array
+    {
+        $themes = $this->bridge->themes();
+        if ($themes === null) {
+            return [$this->resolveThemeByHost((string) ($request->header('host') ?? '')), null];
+        }
+
+        $host  = strtolower((string) ($request->header('host') ?? ''));
+        $theme = $themes->resolveForRequest($host);
+        $site  = $themes->site();
+
+        return [$theme, $site['domain'] ?? null];
+    }
+
     private function isInstallerPath(string $path): bool
     {
         return $path === '/install'
@@ -323,18 +343,16 @@ class Kernel
 
     /**
      * Системная дорога инсталлятора: GET /install (шаг 1), POST /install/settings (шаг 2),
-     * POST /install/run (выполнение установки). Вся логика — через контракты InstallerInterface
-     * и InstallerPageInterface (п.2/п.3 Конституции), HTML формирует модуль Installer.
+     * POST /install/run (выполнение установки). Вся логика — через контракты
+     * модуля Installer (п.2/п.3, резолв через Bridge), HTML формирует сам модуль.
      */
     private function installerResponse(Request $request): Response
     {
-        if (!$this->container->has(InstallerInterface::class)) {
+        $installer = $this->bridge->installer();
+        $pages     = $this->bridge->installerPages();
+        if ($installer === null || $pages === null) {
             return new Response('<h1>503</h1><p>Модуль Installer недоступен.</p>', 503);
         }
-
-        $installer = $this->container->get(InstallerInterface::class);
-        $pages     = $this->container->get(InstallerPageInterface::class);
-        assert($pages instanceof InstallerPageInterface);
 
         $path   = $request->path;
         $method = $request->method;
@@ -347,8 +365,7 @@ class Kernel
             return new Response($pages->requirementsPage($installer->requirements()), 200);
         }
 
-        // Шаг 2: форма настроек. Валидация — через контракт InstallerInterface
-        // (п.2): ядро не знает конкретный класс Installer (правило R6).
+        // Шаг 2: форма настроек. Валидация — через контракт InstallerInterface (п.2).
         if ($path === '/install/settings' && $method === 'POST') {
             $errors = $installer->validateSettings($request->post);
             return new Response($pages->settingsForm($errors), $errors === [] ? 200 : 422);
@@ -376,8 +393,8 @@ class Kernel
                 'Название сайта'           => (string) ($request->post['app_name'] ?? 'VampqweEngineFuture'),
                 'Часовой пояс'             => (string) ($request->post['timezone'] ?? 'UTC'),
                 'Режим отладки'            => isset($request->post['debug']),
-                'Супер-администратор'      => \App\Core\System\Support\SuperAdmin::USERNAME . ' (пароль задан, хеш — в .env)',
-                '.env создан'              => is_file((string) $this->container->get('base_path') . '/.env'),
+                'Супер-администратор'      => SuperAdmin::USERNAME . ' (пароль задан, хеш — в .env)',
+                '.env создан'              => is_file($this->bridge->path('env_path')),
             ];
             // Детали Database-шага (создание БД + развёртывание схемы db.sql), если install() их вернул.
             if (is_array($result)) {
@@ -396,174 +413,18 @@ class Kernel
         return $request->path === '/system/health';
     }
 
+    /**
+     * Рендер главной — делегирован KernelDispatcher (SRP: ядро не является
+     * контроллером; оркестрация дорог остаётся здесь).
+     */
     private function homeResponse(Request $request): Response
     {
-        $appName = 'Unknown Engine';
-        $debug   = false;
-
-        if ($this->container->has(ConfigRepositoryInterface::class)) {
-            $config  = $this->container->get(ConfigRepositoryInterface::class);
-            $appName = (string) $config->get('app.name', $appName);
-            $debug   = (bool) $config->get('app.debug', false);
-        }
-
-        $dbOk = true; $dbDriver = ''; $dbError = null;
-
-        // Честность фундамента: если активирован драйвер Database, а соединения
-        // нет — главная НЕ должна рапортовать «успешно запущен».
-        if ($this->container->has(\App\Core\Module\Database\Contracts\DatabaseInterface::class)) {
-            /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $db */
-            $db  = $this->container->get(\App\Core\Module\Database\Contracts\DatabaseInterface::class);
-            $dbError = $db->connectionError();
-            if ($dbError !== null) {
-                $dbOk = false;
-                $dbDriver = $db->driver();
-            }
-        }
-        $status = $dbOk ? 200 : 503;
-
-        // Мультисайт: тема сайта по домену запроса — через модуль Theme
-        // (реестр engine_sites -> эвристика поддомена -> дефолт из config/template.php).
-        $theme = '';
-        $site  = null;
-        if ($this->container->has(\App\Core\Module\Theme\Contracts\ThemeInterface::class)) {
-            /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
-            $themes = $this->container->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
-            $host   = $request->header('host') ?? '';
-            $theme  = $themes->resolveForRequest($host);
-            $site   = $themes->site();
-
-            // Тема резолвлена, но её папки ещё нет (только что добавленный
-            // сайт) — авто-клон стартера view/app/_starter. Движок не падает:
-            // до клонирования рендер идёт через fallback '_default' в Template.
-            if ($site !== null && $site['theme'] !== '' && !$themes->exists($site['theme'])
-                && $this->container->has(\App\Core\Module\FileSystem\Contracts\FileSystemInterface::class)) {
-                $fs      = $this->container->get(\App\Core\Module\FileSystem\Contracts\FileSystemInterface::class);
-                $appView = (string) $this->container->get('app_view_path');
-                $starter = $appView . '/_starter';
-                $target  = $appView . '/' . $site['theme'];
-                if ($fs->isDirectory($starter) && $this->cloneStarter($fs, $starter, $target)) {
-                    $themes->use($site['theme']);
-                    $theme = $site['theme'];
-                }
-            }
-
-            // Хук мультисайта: сторонние модули реагируют на резолв сайта
-            // без правки ядра (п.4 Конституции).
-            if ($theme !== '' && $this->container->has(HookInterface::class)) {
-                /** @var HookInterface $hooks */
-                $hooks = $this->container->get(HookInterface::class);
-                $hooks->dispatch('theme.resolved', $theme, $site, $host);
-            }
-        } elseif ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
-            // Fallback без Theme-модуля: прежняя эвристика поддомена.
-            $theme = $this->resolveThemeByHost($request->header('host') ?? '');
-        }
-
-        // Рендер через модуль Template (view/app/<theme>/home.phtml).
-        if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
-            /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
-            $views = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
-
-            // Статика темы — через реестр Assets (каскад site->theme->core):
-            // регистрируем 'site.css'/'site.js' и публикуем теги в шаблоны.
-            // Файлы темы меняются без правки layout; хук engine.assets.*
-            // даёт модулям дописать своё (п.4). Если файлов нет — в касскаде
-            // совпадения не будет, URL всё равно корректен (404 без ?v=),
-            // а layout темы использует инлайн-fallback.
-            if ($this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
-                /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
-                $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
-                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : ThemeInterface::DEFAULT_THEME);
-                $assets->registerStyle('site', 'css/site.css');
-                $assets->registerScript('site', 'js/site.js');
-                $views->share('assetsStyles', $assets->styles());
-                $views->share('assetsScripts', $assets->scripts());
-            }
-
-            try {
-                if ($theme !== '') {
-                    $views->setTheme($theme);
-                }
-                $body = $views->render('home', [
-                    'appName'    => $appName,
-                    'debug'      => $debug,
-                    'debugLabel' => $debug ? 'ON' : 'OFF',
-                    'dbOk'       => $dbOk,
-                    'dbDriver'   => $dbDriver,
-                    'dbError'    => $dbError,
-                    'site'       => $site,
-                ]);
-                return new Response($body, $status);
-            } catch (\Throwable $e) {
-                // сломанный шаблон не должен ронять движок — уходим в fallback-текст
-                if ($this->container->has(\App\Core\Module\Logger\Contracts\LoggerInterface::class)) {
-                    $this->container->get(\App\Core\Module\Logger\Contracts\LoggerInterface::class)
-                        ->error('Template: рендер home не удался, сработал fallback', ['exception' => $e, 'channel' => 'Template']);
-                }
-            }
-        }
-
-        // Fallback без Template (например, шаблоны ещё не созданы).
-        $body = $dbOk
-            ? "✅ <b>" . htmlspecialchars($appName, ENT_QUOTES) . "</b> (Debug: " . ($debug ? 'ON' : 'OFF') . ") успешно запущен!"
-            : "⚠️ <b>" . htmlspecialchars($appName, ENT_QUOTES) . "</b>: база данных «" . htmlspecialchars($dbDriver, ENT_QUOTES) . "» недоступна.";
-        return new Response($body, $status);
-    }
-
-    /**
-     * Мультисайт: рекурсивно клонирует папку-стартер темы (view/app/_starter)
-     * в новую тему сайта. best effort: любой сбой FS означает «папки нет»,
-     * рендер уйдёт через fallback '_default' — движок не падает (принцип п.9).
-     */
-    private function cloneStarter(
-        \App\Core\Module\FileSystem\Contracts\FileSystemInterface $fs,
-        string $source,
-        string $target,
-    ): bool {
-        if (!$fs->createDirectory($target)) {
-            return false;
-        }
-
-        foreach ((array) glob($source . '/*') as $entry) {
-            $name = $fs->basename((string) $entry);
-            if ($name === '' || $name[0] === '.') {
-                continue;
-            }
-            $dest = $target . '/' . $name;
-            if (is_dir($entry)) {
-                if (!$this->cloneStarter($fs, (string) $entry, $dest)) {
-                    return false;
-                }
-            } elseif (!$fs->copy((string) $entry, $dest)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Мультисайт: сопоставляет хост запроса с темой view/app/.
-     * Временная эвристика до появления таблицы sites: поддомен/домен вида
-     * animals.localhost или animals.local -> тема 'animals'.
-     */
-    private function resolveThemeByHost(string $host): string
-    {
-        $host = strtolower(preg_replace('/:\d+$/', '', $host) ?? $host);
-        if ($host === '' || $host === 'localhost' || str_contains($host, '127.0.0.1')) {
-            return '';
-        }
-        $first = explode('.', $host)[0];
-        if (preg_match('#^[a-z0-9_-]+$#', $first) && $first !== 'www') {
-            return $first;
-        }
-        return '';
+        return (new KernelDispatcher($this->bridge))->home($request);
     }
 
     private function healthResponse(Request $request): Response
     {
-        $storagePath = $this->container->get('storage_path');
+        $storagePath = $this->bridge->path('storage_path');
 
         $payload = [
             'status'  => 'ok',
@@ -574,9 +435,8 @@ class Kernel
         ];
 
         // Database: честный статус PDO-соединения (ping() не бросает исключений).
-        if ($this->container->has(\App\Core\Module\Database\Contracts\DatabaseInterface::class)) {
-            /** @var \App\Core\Module\Database\Contracts\DatabaseInterface $db */
-            $db = $this->container->get(\App\Core\Module\Database\Contracts\DatabaseInterface::class);
+        $db = $this->bridge->database();
+        if ($db !== null) {
             $connected = $db->ping();
             $payload['database'] = ['driver' => $db->driver(), 'connected' => $connected];
 
@@ -584,8 +444,7 @@ class Kernel
             // статус degraded + HTTP 503 (принцип честности фундамента).
             if (!$connected) {
                 $payload['status'] = 'degraded';
-                if ($debug = $this->container->has(ConfigRepositoryInterface::class)
-                    && (bool) $this->container->get(ConfigRepositoryInterface::class)->get('app.debug', false)) {
+                if ((bool) $this->bridge->configValue('app.debug', false)) {
                     $payload['database']['error'] = $db->connectionError();
                 }
             }
@@ -613,8 +472,8 @@ class Kernel
             AppState::Error        => '❌ Критическая ошибка приложения.',
         };
 
-        if ($this->container->has(ErrorPageInterface::class)) {
-            $body = $this->container->get(ErrorPageInterface::class)->render($code);
+        if ($this->bridge->hasErrorPages()) {
+            $body = $this->bridge->errorPage($code);
             // Служебное сообщение состояния добавляем к стандартной странице.
             $body = str_replace('</body>', '<p>' . $title . '</p></body>', $body);
 
@@ -624,26 +483,31 @@ class Kernel
         return new Response('<h1>' . $code . '</h1><p>' . $title . '</p>', $code);
     }
 
+    /**
+     * Детект состояния движка — делегация единому резолверу AppState::detect()
+     * (п.10: одна реализация, имена маркеров только в AppState::flagNames()).
+     */
     private function detectAppState(): AppState
     {
-        $storagePath = $this->container->get('storage_path');
+        return AppState::detect($this->bridge->path('storage_path'));
+    }
 
-        if (!file_exists($storagePath . '/.installed')) {
-            return AppState::NotInstalled;
+    /**
+     * Мультисайт-fallback: сопоставляет хост запроса с темой view/app/.
+     * Временная эвристика до появления таблицы sites: поддомен/домен вида
+     * animals.localhost или animals.local -> тема 'animals'. Используется
+     * только когда Theme-модуль недоступен.
+     */
+    private function resolveThemeByHost(string $host): string
+    {
+        $host = strtolower(preg_replace('/:\d+$/', '', $host) ?? $host);
+        if ($host === '' || $host === 'localhost' || str_contains($host, '127.0.0.1')) {
+            return '';
         }
-        if (file_exists($storagePath . '/.installing')) {
-            return AppState::Installing;
+        $first = explode('.', $host)[0];
+        if (preg_match('#^[a-z0-9_-]+$#', $first) && $first !== 'www') {
+            return $first;
         }
-        if (file_exists($storagePath . '/.upgrading')) {
-            return AppState::Upgrading;
-        }
-        if (file_exists($storagePath . '/.maintenance')) {
-            return AppState::Maintenance;
-        }
-        if (file_exists($storagePath . '/.error')) {
-            return AppState::Error;
-        }
-
-        return AppState::Running;
+        return '';
     }
 }

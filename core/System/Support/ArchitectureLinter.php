@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Core\System\Support;
 
+use App\Core\System\Enums\AppState;
+
 /**
  * Статический контрольщик архитектуры (пункт 5 плана развития).
  *
@@ -21,7 +23,7 @@ namespace App\Core\System\Support;
  *   Д о к а з а т е л ь с т в о  строится построчно: каждое правило
  *   имеет хотя бы один исполняемый детектор в этом классе либо тест
  *   в tests/. Карта доказательств (правило → чем проверяется):
- *     п.1 (ядро не знает бизнес-логику)  → R6, R8   + KernelBoundaryTest
+ *     п.1 (ядро не знает бизнес-логику)  → R6, R6b, R8 + KernelBoundaryTest
  *     п.2 (только контракты)             → R3, R6, R8, R9
  *     п.3 (DI, никаких глобалов)         → R2, R7, R10 + ContainerTest
  *     п.4 (хуки вместо правок ядра)      → HookTest, AssetsTest (dispatch-точки)
@@ -50,6 +52,11 @@ namespace App\Core\System\Support;
  *      (core/Module/*, app/modules/*) в executable-коде — только на их
  *      Contracts/ (п.1/п.2). Разрешены: use-строки, PHPDoc, хук-строки
  *      ('engine.*'), service-ключи ('*_path').
+ *  R6b. СТРУКТУРНОЕ усиление R6: ссылки ядра на контракты модулей живут
+ *      ТОЛЬКО в Support\ModuleBridge (единственный мост «ядро→модули»).
+ *      Ни один другой файл core/System/** не содержит literal-ссылки
+ *      App\...\Module\<X>::class / App\modules\<X>::class даже внутри
+ *      use-строк и PHPDoc (ловится и «перенос знания» рефакторингом).
  *  R7. Пути проекта строятся только из Paths::MAP (п.7): запрещены
  *      BASE_PATH . '/...' и конкатенации '*_path' с литеральными
  *      сегментами вне MAP.
@@ -122,9 +129,28 @@ final class ArchitectureLinter
      * через уже легальные '*_path' (storage_path/base_path), поэтому сам
      * литерал имени не требует ключа в MAP.
      *
+     * Словарь НЕ дублирует имена флагов: они берутся у AppState::flagNames()
+     * (п.10 — единственный источник имён); здесь остаётся только '.env',
+     * который не является маркером состояния.
+     *
      * @var list<string>
      */
-    private const ALLOWED_FILE_LITERALS = ['.env', '.installed', '.installing', '.maintenance', '.upgrading', '.error'];
+    private const EXTRA_FILE_LITERALS = ['.env'];
+
+    /**
+     * Собственный файл линтера содержит строки-доказательства (сообщения о
+     * нарушениях с цитатами запрещённых литералов) — он обязан быть чист от
+     * запрещённых паттернов в executable-коде, иначе проверка «сама себя
+     * ловит». Исключается из контентных проверок R7/флагов; структурные
+     * (R1/R4) к нему применяются.
+     */
+    private const SELF_FILE = 'core/System/Support/ArchitectureLinter.php';
+
+    /** @return list<string> */
+    private function allowedFileLiterals(): array
+    {
+        return array_merge(self::EXTRA_FILE_LITERALS, array_values(AppState::flagNames()));
+    }
 
     /**
      * Белый список R8: файлы-исключения из п.2 (осознанный хардкод,
@@ -155,6 +181,13 @@ final class ArchitectureLinter
      */
     private const TEST_INTERNAL_WHITELIST = [
         'tests/Unit/SecurityTest.php',
+        // Инспекция исходников ядра (T3 теоремы): читает core/System/** как данные;
+        // поиск корня репозитория через dirname — легален с аннотацией п.7 (R8 требует её).
+        'tests/Unit/KernelBoundaryTest.php',
+        // Юнит-тест внутренней проверки Doctor (детектор утечки секретов в git):
+        // обязан иметь доступ к объекту теста (Checks\SecretLeakCheck — Internal-зона
+        // модуля Doctor, п.2); поиск корня через dirname — тот же легальный паттерн п.7.
+        'tests/Unit/SecretLeakCheckTest.php',
     ];
 
     public function __construct(private readonly string $basePath)
@@ -180,7 +213,12 @@ final class ArchitectureLinter
             }
 
             // ---- R2: dirname(__DIR__, N) как путь проекта ----
-            if (preg_match('/dirname\(\s*__DIR__\s*,\s*\d+\s*\)/', $src)) {
+            // Пути проекта живут только в Paths::MAP (п.7). Тест-инспекции,
+            // читающие исходники репозитория, получают корень бытовым
+            // dirname(__DIR__) от namespace-папки и обязаны нести аннотацию
+            // @constitution-exception (проверяется R8-механикой whitelist).
+            if (preg_match('/dirname\(\s*__DIR__\s*,\s*\d+\s*\)/', $src)
+                && !str_contains($src, '@constitution-exception п.7')) {
                 $violations[] = "R2 путь через dirname(__DIR__, N) вместо Paths — {$rel}";
             }
 
@@ -211,6 +249,21 @@ final class ArchitectureLinter
                         $violations[] = "R6 ядро ссылается на класс модуля [{$fqcn}] — {$rel}"
                             . ' (разрешены только контракты из CORE_ALLOWED_REFERENCES)';
                     }
+                }
+            }
+
+            // ---- R6b: знание о модулях — только в ModuleBridge (структурная теорема) ----
+            if (str_starts_with($rel, 'core/System/')
+                && $rel !== 'core/System/Support/ModuleBridge.php') {
+                if (preg_match_all(
+                    '/(?:App\\\\(?:Core\\\\)?Module|App\\\\modules)\\\\[A-Za-z0-9_\\\\]*?\\\\[A-Za-z0-9_]+(?=::class|;)/',
+                    $src,
+                    $mBridge
+                )) {
+                    $violations[] = "R6b ссылка на контракт модуля вне ModuleBridge — {$rel}: "
+                        . implode(', ', array_values(array_unique($mBridge[0])))
+                        . ' (единственный легальный мост ядро→модули: core/System/Support/ModuleBridge.php;'
+                        . ' перенесите резолв в Bridge)';
                 }
             }
 
@@ -395,7 +448,8 @@ final class ArchitectureLinter
      * R7: конкатенации путей вне Paths::MAP.
      *  - BASE_PATH . '/<что-то>' — запрещено (кроме bootstrap-файлов);
      *  - <...>_path / basePath / storagePath . '/<сегмент>' — сегмент обязан
-     *    быть либо ключом MAP, либо точечным маркером из ALLOWED_FILE_LITERALS.
+     *    быть либо ключом MAP, либо точечным маркером из allowedFileLiterals()
+     *    (словарь имён флагов живёт в AppState — п.10).
      *
      * @return list<string>
      */
@@ -404,6 +458,13 @@ final class ArchitectureLinter
         // Bootstrap-исключения: единственные места, где корень проекта
         // определяется физически (публичный контракт развёртывания).
         if (in_array($rel, ['public/index.php', 'bin/engine', 'tests/run.php'], true)) {
+            return [];
+        }
+
+        // Собственный файл линтера содержит строки-доказательства с цитатами
+        // запрещённых литералов — контентные проверки к нему неприменимы
+        // (иначе проверка ловит саму себя; структурные R1/R4 работают).
+        if ($rel === self::SELF_FILE) {
             return [];
         }
 
@@ -430,7 +491,7 @@ final class ArchitectureLinter
                     continue;
                 }
                 $clean = ltrim($seg, '/');
-                if (in_array($clean, self::ALLOWED_FILE_LITERALS, true)) {
+                if (in_array($clean, $this->allowedFileLiterals(), true)) {
                     continue; // точечный маркер/конфиг — легально
                 }
                 // разрешаем '<dir>' только если это префикс какого-то ключа MAP
