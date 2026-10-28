@@ -21,6 +21,40 @@ final class QueueWhitelistTest extends TestCase
         $this->dir = sys_get_temp_dir() . '/engine_queue_wl_' . bin2hex(random_bytes(4));
     }
 
+    /**
+     * Регрессия order-dependent бага кэша whitelist: если первый скан
+     * get_declared_classes() выполняется ДО объявления job-классов (в бою —
+     * другой модуль трогает драйвер раньше, чем автозагрузчик объявит задачи),
+     * «замороженный» пустой кэш превращал payload в __PHP_Incomplete_Class и
+     * reserve() возвращал null. Инвариант: пустой кэш пересобирается при
+     * следующем обращении, непустой — нет (см. PHPDoc allowedJobClasses()).
+     */
+    public function testEmptyWhitelistIsNotFrozenByFirstScan(): void
+    {
+        // Первый контакт с классом драйвера — вызов статического сканера
+        // (job-классы приложения ещё не загружены): получаем пустой whitelist.
+        $scan = new \ReflectionMethod(FileQueueDriver::class, 'allowedJobClasses');
+        $scan->setAccessible(true);
+        /** @var list<string> $first */
+        $first = $scan->invoke(null);
+
+        // Полный roundtrip обязан работать независимо от того, был ли первый
+        // скан пустым (до загрузки классов) или непустым.
+        $driver = new FileQueueDriver($this->dir);
+        $id       = $driver->push(new WlEchoJob(), 0);
+        $reserved = $driver->reserve(30);
+
+        $this->assertNotNull(
+            $reserved,
+            $first === []
+                ? 'Пустой первый скан не должен замораживать whitelist.'
+                : 'Roundtrip с непустым whitelist обязан резолвить джоб.'
+        );
+        $this->assertSame($id, (string) $reserved[1]);
+
+        $driver->ack((string) $reserved[1]);
+    }
+
     public function testClassLoadsAndRoundtripSurvivesWhitelist(): void
     {
         $queue = new QueueManager(new FileQueueDriver($this->dir), 'file', 3, 60, 30);

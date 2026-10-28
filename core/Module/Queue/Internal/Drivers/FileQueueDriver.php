@@ -38,6 +38,9 @@ final class FileQueueDriver implements DriverInterface
             'attempts' => 0,
             'avail_at' => time() + max(0, $delaySeconds),
             'job'      => serialize($job),
+            // FQN payload'а — для точечной инвалидации кэша whitelist на reserve()
+            // (см. allowedJobClasses()). Пишется из get_class() живого экземпляра.
+            'class'    => $job::class,
         ];
         $dir = $delaySeconds > 0 ? 'delayed' : 'pending';
         return $this->atomicWrite($this->directory . '/' . $dir . '/' . $id . '.json', $payload)
@@ -84,10 +87,11 @@ final class FileQueueDriver implements DriverInterface
             try {
                 // Десериализация только что провалидированного джоба; классы ограничены
                 // whitelisted-набором JobInterface — защита от POP-вектора (п.10 безопасности).
+                // 'class' отсутствует в старых payload'ах -> '' -> скан без хита, пересборка кэша.
                 /** @var JobInterface $job */
                 $job = unserialize(
                     (string) $p['job'],
-                    ['allowed_classes' => self::allowedJobClasses()]
+                    ['allowed_classes' => self::allowedJobClasses((string) ($p['class'] ?? ''))]
                 );
             } catch (\Throwable) {
                 // повреждённый payload — не должен блокировать очередь
@@ -120,12 +124,24 @@ final class FileQueueDriver implements DriverInterface
      * unserialize тогда превращает объекты в __PHP_Incomplete_Class, а последующая
      * проверка instanceof JobInterface корректно отправляет payload в failed/.
      *
+     * КЭШИРОВАНИЕ: whitelist пересобирается при каждом reserve(), если он
+     * оказался пустым ИЛИ не содержит класса десериализуемого payload'а.
+     * Инвариант корректности: push() сериализует экземпляр, значит его класс
+     * точно загружен в памяти процесса — если он отсутствует в кэше, тот
+     * устарел (первый скан прошёл до объявления job-классов, например другой
+     * модуль потрогал драйвер раньше автозагрузчика задач). Повторный скан
+     * дешёв и снимает order-dependent ложные провалы без потери защиты POP:
+     * набор по-прежнему ограничен реализациями JobInterface проекта.
+     *
+     * @param class-string $wanted FQN класса payload'а (из get_class($job) на push).
      * @return list<string>
      */
-    private static function allowedJobClasses(): array
+    private static function allowedJobClasses(string $wanted): array
     {
-        static $cache = null;
-        if ($cache !== null) {
+        static $cache = [];
+
+        // Непустой кэш валиден, только если уже включает нужный класс.
+        if ($cache !== [] && in_array($wanted, $cache, true)) {
             return $cache;
         }
 
