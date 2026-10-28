@@ -62,17 +62,31 @@ enum AppState: string
      */
     public static function detect(string $storagePath): self
     {
-        foreach (self::cases() as $case) {
-            if ($case === self::NotInstalled) {
-                continue; // это «нет маркеров», проверяется последним
-            }
-            if (is_file($case->marker($storagePath))) {
-                return $case;
+        // Приоритет задаёт порядок flagNames() (исторический порядок
+        // detectAppState()), а не порядок объявления кейсов enum:
+        // Installing > Upgrading > Maintenance > Error. Имена флагов
+        // берутся из словаря, литералов в детекте нет (п.7/п.10).
+        $flags = self::flagNames();
+        unset($flags[self::NotInstalled->name]); // это «нет маркеров», проверяется последним
+        foreach ($flags as $name => $markerFile) {
+            if (is_file($storagePath . '/' . $markerFile)) {
+                return self::fromName($name);
             }
         }
 
         return is_file(self::NotInstalled->marker($storagePath))
             ? self::Running   // '.installed' есть, прочих нет — живой движок
             : self::NotInstalled;
+    }
+
+    /** Кейс по имени объявления (name, не backing value). */
+    private static function fromName(string $name): self
+    {
+        foreach (self::cases() as $case) {
+            if ($case->name === $name) {
+                return $case;
+            }
+        }
+        throw new \InvalidArgumentException("Unknown AppState name: {$name}");
     }
 }

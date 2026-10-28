@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Core\System\Support;
 
+use App\Core\System\Enums\AppState;
+
 /**
  * Статический контрольщик архитектуры (пункт 5 плана развития).
  *
@@ -122,9 +124,28 @@ final class ArchitectureLinter
      * через уже легальные '*_path' (storage_path/base_path), поэтому сам
      * литерал имени не требует ключа в MAP.
      *
+     * Словарь НЕ дублирует имена флагов: они берутся у AppState::flagNames()
+     * (п.10 — единственный источник имён); здесь остаётся только '.env',
+     * который не является маркером состояния.
+     *
      * @var list<string>
      */
-    private const ALLOWED_FILE_LITERALS = ['.env', '.installed', '.installing', '.maintenance', '.upgrading', '.error'];
+    private const EXTRA_FILE_LITERALS = ['.env'];
+
+    /**
+     * Собственный файл линтера содержит строки-доказательства (сообщения о
+     * нарушениях с цитатами запрещённых литералов) — он обязан быть чист от
+     * запрещённых паттернов в executable-коде, иначе проверка «сама себя
+     * ловит». Исключается из контентных проверок R7/флагов; структурные
+     * (R1/R4) к нему применяются.
+     */
+    private const SELF_FILE = 'core/System/Support/ArchitectureLinter.php';
+
+    /** @return list<string> */
+    private function allowedFileLiterals(): array
+    {
+        return array_merge(self::EXTRA_FILE_LITERALS, array_values(AppState::flagNames()));
+    }
 
     /**
      * Белый список R8: файлы-исключения из п.2 (осознанный хардкод,
@@ -155,6 +176,9 @@ final class ArchitectureLinter
      */
     private const TEST_INTERNAL_WHITELIST = [
         'tests/Unit/SecurityTest.php',
+        // Инспекция исходников ядра (T3 теоремы): читает core/System/** как данные;
+        // поиск корня репозитория через dirname — легален с аннотацией п.7 (R8 требует её).
+        'tests/Unit/KernelBoundaryTest.php',
     ];
 
     public function __construct(private readonly string $basePath)
@@ -180,7 +204,12 @@ final class ArchitectureLinter
             }
 
             // ---- R2: dirname(__DIR__, N) как путь проекта ----
-            if (preg_match('/dirname\(\s*__DIR__\s*,\s*\d+\s*\)/', $src)) {
+            // Пути проекта живут только в Paths::MAP (п.7). Тест-инспекции,
+            // читающие исходники репозитория, получают корень бытовым
+            // dirname(__DIR__) от namespace-папки и обязаны нести аннотацию
+            // @constitution-exception (проверяется R8-механикой whitelist).
+            if (preg_match('/dirname\(\s*__DIR__\s*,\s*\d+\s*\)/', $src)
+                && !str_contains($src, '@constitution-exception п.7')) {
                 $violations[] = "R2 путь через dirname(__DIR__, N) вместо Paths — {$rel}";
             }
 
@@ -395,7 +424,8 @@ final class ArchitectureLinter
      * R7: конкатенации путей вне Paths::MAP.
      *  - BASE_PATH . '/<что-то>' — запрещено (кроме bootstrap-файлов);
      *  - <...>_path / basePath / storagePath . '/<сегмент>' — сегмент обязан
-     *    быть либо ключом MAP, либо точечным маркером из ALLOWED_FILE_LITERALS.
+     *    быть либо ключом MAP, либо точечным маркером из allowedFileLiterals()
+     *    (словарь имён флагов живёт в AppState — п.10).
      *
      * @return list<string>
      */
@@ -404,6 +434,13 @@ final class ArchitectureLinter
         // Bootstrap-исключения: единственные места, где корень проекта
         // определяется физически (публичный контракт развёртывания).
         if (in_array($rel, ['public/index.php', 'bin/engine', 'tests/run.php'], true)) {
+            return [];
+        }
+
+        // Собственный файл линтера содержит строки-доказательства с цитатами
+        // запрещённых литералов — контентные проверки к нему неприменимы
+        // (иначе проверка ловит саму себя; структурные R1/R4 работают).
+        if ($rel === self::SELF_FILE) {
             return [];
         }
 
@@ -430,7 +467,7 @@ final class ArchitectureLinter
                     continue;
                 }
                 $clean = ltrim($seg, '/');
-                if (in_array($clean, self::ALLOWED_FILE_LITERALS, true)) {
+                if (in_array($clean, $this->allowedFileLiterals(), true)) {
                     continue; // точечный маркер/конфиг — легально
                 }
                 // разрешаем '<dir>' только если это префикс какого-то ключа MAP
