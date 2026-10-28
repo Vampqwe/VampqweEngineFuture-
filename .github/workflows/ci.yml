@@ -34,5 +34,15 @@ jobs:
       - name: Поведение (Unit-тесты, включая KernelBoundaryTest T1–T3)
         run: php bin/engine test
 
+      # Doctor честен (п.9): без .env он вердиктует «есть проблемы», и это правильно.
+      # В CI мы проверяем живой дерево на детерминированном стенде: sqlite-стенд
+      # собирается из .env.example точечными заменами (не коммитится, живёт только в раннере).
+      - name: Конфигурация CI-стенда (.env из .env.example + sqlite)
+        run: |
+          cp .env.example .env
+          sed -i 's/^DB_DRIVER=mysql/DB_DRIVER=sqlite/' .env
+          sed -i 's/^DB_SQLITE_ENABLED=false/DB_SQLITE_ENABLED=true/' .env
+          sed -i 's|^DB_DATABASE_PATH=$|DB_DATABASE_PATH=engine.sqlite|' .env
+
       - name: Честная самодиагностика живого дерева
         run: php bin/engine doctor

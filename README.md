@@ -52,12 +52,12 @@
 
 ---
 
-## 🎨 Правила стиля (проверено по факту: 129/129 файлов)
+## 🎨 Правила стиля (проверено по факту: 166/166 файлов)
 
-Фактическая проверка репозитория: **все 129 PHP-файлов** (core, app, tests, config, public, bin)
+Фактическая проверка репозитория: **все 166 PHP-файлов** (core, app, tests, config, public)
 содержат `declare(strict_types=1)`. Это инвариант, а не рекомендация.
 
-1. `declare(strict_types=1)` — **первая строка после `<?php` в каждом файле без исключений** (129/129 ✓).
+1. `declare(strict_types=1)` — **первая строка после `<?php` в каждом файле без исключений** (166/166 ✓).
 2. PSR-4: `App\Core\` → `core/`, `App\` → `app/`, `Tests\` → `tests/`; регистр namespace совпадает с регистром директорий.
 3. Только современные фичи PHP 8.1+: enums, readonly-свойства, match, named arguments, first-class callable syntax.
 4. Подробные PHPDoc на русском у каждого класса/контракта со ссылкой на пункт Конституции (`п.N Конституции`), где это применимо.
@@ -75,9 +75,9 @@
 ├── core/
 │   ├── System/      ← ядро: App, Container, Http (Kernel, Request, Response, Middleware),
 │   │                   Support (Paths, Router, EnvLoader, SuperAdmin, FatalPage), Enums (AppState)
-│   └── Module/      ← 19 модулей ядра: FileSystem, Parser, ArrayHelper, Hook, Config, Logger,
+│   └── Module/      ← 21 модуль ядра: FileSystem, Parser, ArrayHelper, Hook, Config, Logger,
 │   │                   TimeDate, Exception, Error, Cache, Database, Security, Session, Template,
-│   │                   Queue, Migration, Theme, Doctor, Installer
+│   │                   Queue, Migration, Theme, Doctor, Installer, Admin, Assets
 ├── app/modules/     ← пользовательские модули (Pages, Auth, …) — тот же канон Contracts/Internal
 ├── config/          ← app.php, modules.php (манифест модулей, п.6)
 ├── view/            ← core_view (ошибки/установщик/админка) и app_view (темы мультисайта)
@@ -85,7 +85,9 @@
 ├── logs/            ← логи по каналам: logs/<дата>/<Модуль>.log
 ├── database/        ← SQL-дампы схемы (db.sql)
 ├── migrations/      ← версии схемы БД (<ГГГГ_ММ_ДД_HHMMSS>_имя.php)
-├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme)
+├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T3)
+├── docs/            ← CONSTITUTION.md — реестр «правило → чем проверяется» (Теорема синхронизации)
+├── .github/workflows/ci.yml ← merge-gate: lint-rules ∧ test ∧ doctor (sqlite-стенд из .env.example)
 ├── bin/             ← CLI: php bin/engine doctor | migrate | sites | site:add | test | lint-rules
 └── vendor/          ← только composer-автозагрузчик (никаких сторонних пакетов)
 ```
@@ -94,6 +96,17 @@
 
 - CLI: `php bin/engine doctor` — PHP, autoload, `.env`, права `storage/`, загрузка всех модулей ядра, регистрация путей (п.7), состояние.
 - HTTP: `GET /system/health` — JSON-вердикт; доступен даже в режиме обслуживания.
+- CI merge-gate (`.github/workflows/ci.yml`): `lint-rules ∧ test ∧ doctor` на PHP 8.1/8.3; для doctor собирается детерминированный sqlite-стенд из `.env.example` (`DB_DRIVER=sqlite`, `DB_SQLITE_ENABLED=true`, `DB_DATABASE_PATH=engine.sqlite`) — без реальных СУБД и секретов.
+
+## ⚖️ Теорема синхронизации
+
+> `lint-rules exit 0` **∧** `test exit 0` ⇒ код соответствует Конституции (п.1–п.10).
+
+Реестр доказательств «правило → линтер R1–R11 / тест T1–T3» и легальные исключения
+(аннотации `@constitution-exception`) — в [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md);
+формулировка теоремы продублирована в PHPDoc `ArchitectureLinter`. Нарушение, которое
+не ловится ни одной проверкой, считается слепым пятном теоремы и закрывается новым
+правилом или тестом — не аннотацией.
 
 ## 🚀 Быстрый старт
 
