@@ -35,6 +35,15 @@ class Kernel
             $this->migrateSessionStoreOnce($session);
         }
 
+        // П.4 Конституции: модули/темы регистрируют ассеты через хук-действие
+        // без правки движка (после boot контейнер уже содержит Hook + Assets).
+        if ($this->container->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
+            && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+            $this->container->get(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                ->dispatch('engine.assets.registered',
+                    $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class));
+        }
+
         // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
         // до установки это единственный способ довести движок до Running.
         if ($this->isInstallerPath($request->path)) {

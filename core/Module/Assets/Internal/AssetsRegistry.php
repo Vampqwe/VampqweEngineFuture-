@@ -5,6 +5,7 @@ namespace App\Core\Module\Assets\Internal;
 
 use App\Core\Module\Assets\Contracts\AssetsInterface;
 use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
+use App\Core\Module\Hook\Contracts\HookInterface;
 
 /**
  * Реестр ассетов и раздача статики (внутренняя кухня модуля Assets — п.2).
@@ -51,6 +52,7 @@ final class AssetsRegistry implements AssetsInterface
         private readonly string $coreAssetsPath,   // view/core/assets
         private readonly string $appViewPath,      // view/app
         private readonly string $sitesPath,        // storage/sites
+        private readonly ?HookInterface $hook = null, // п.4: хуки расширения (опционально)
     ) {
     }
 
@@ -76,6 +78,10 @@ final class AssetsRegistry implements AssetsInterface
             $href = htmlspecialchars($this->url($item['src']), ENT_QUOTES);
             $out .= "<link rel=\"stylesheet\" href=\"{$href}\" media=\"screen\">\n";
         }
+        // П.4 Конституции: хук-фильтр — тема/модуль может дописать свои теги.
+        if ($this->hook !== null) {
+            $out = (string) $this->hook->applyFilters('engine.assets.styles', $out);
+        }
         return rtrim($out, "\n");
     }
 
@@ -85,6 +91,10 @@ final class AssetsRegistry implements AssetsInterface
         foreach ($this->order($this->scripts) as $item) {
             $src = htmlspecialchars($this->url($item['src']), ENT_QUOTES);
             $out .= "<script src=\"{$src}\" defer></script>\n";
+        }
+        // П.4 Конституции: хук-фильтр для скриптов.
+        if ($this->hook !== null) {
+            $out = (string) $this->hook->applyFilters('engine.assets.scripts', $out);
         }
         return rtrim($out, "\n");
     }

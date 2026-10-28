@@ -33,6 +33,9 @@ class AssetsServiceProvider implements ModuleProviderInterface
                 (string) $c->get('core_view_path') . '/assets',
                 (string) $c->get('app_view_path'),
                 (string) $c->get('storage_path') . '/sites',
+                $c->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                    ? $c->get(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                    : null,
             );
         });
     }
