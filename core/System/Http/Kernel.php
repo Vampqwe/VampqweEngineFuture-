@@ -35,10 +35,29 @@ class Kernel
             $this->migrateSessionStoreOnce($session);
         }
 
+        // П.4 Конституции: модули/темы регистрируют ассеты через хук-действие
+        // без правки движка (после boot контейнер уже содержит Hook + Assets).
+        if ($this->container->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
+            && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+            $this->container->get(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                ->dispatch('engine.assets.registered',
+                    $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class));
+        }
+
         // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
         // до установки это единственный способ довести движок до Running.
         if ($this->isInstallerPath($request->path)) {
             return $this->installerResponse($request);
+        }
+
+        // Статика (модуль Assets): /assets/<path> раздаётся PHP из каскада
+        // site-sandbox -> theme -> core ДО проверки состояния — инсталлятору
+        // и страницам ошибок свои CSS нужны и в NotInstalled/Maintenance.
+        // До установки Theme/Database нет — контекст выставит сам assetResponse
+        // best-effort (без него работает только CORE-каскад).
+        if (str_starts_with($request->path, '/assets/')
+            && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+            return $this->finish($this->assetResponse($request), $session);
         }
 
         // Для состояний вне Running отдаём служебные страницы,
@@ -86,15 +105,15 @@ class Kernel
             $userRouter->post('/logout', fn(Request $r): Response => $auth->logout($r));
         }
 
-        // Панель администратора (модуль Admin, app/modules): ВСЯ дорога
+        // Панель администратора (СИСТЕМНЫЙ модуль Admin, core/Module/Admin): ВСЯ дорога
         // /admin/* делегируется одному контракту AdminPanelInterface — ядро
         // не знает маршрутов/разделов/шаблонов панели (п.2). Регистрация ДО
         // /{slug}: '/admin' и любой хвост /admin/pages/edit/5 перехватываются
         // панелью раньше контентных страниц; Guard внутри facade проверяется
         // до маршрутизации по разделам.
-        if ($this->container->has(\App\modules\Admin\Contracts\AdminPanelInterface::class)) {
-            /** @var \App\modules\Admin\Contracts\AdminPanelInterface $admin */
-            $admin = $this->container->get(\App\modules\Admin\Contracts\AdminPanelInterface::class);
+        if ($this->container->has(\App\Core\Module\Admin\Contracts\AdminPanelInterface::class)) {
+            /** @var \App\Core\Module\Admin\Contracts\AdminPanelInterface $admin */
+            $admin = $this->container->get(\App\Core\Module\Admin\Contracts\AdminPanelInterface::class);
             $adminRoute = fn(Request $r): Response => $admin->dispatch($r);
             $userRouter->any('/admin', $adminRoute);
             $userRouter->any('/admin/{tail*}', $adminRoute);
@@ -229,6 +248,67 @@ class Kernel
             || str_starts_with($path, '/admin')
             || str_starts_with($path, '/api/system')
             || $this->isInstallerPath($path);
+    }
+
+    /**
+     * Раздача статики (модуль Assets): /assets/<path> -> каскад
+     * site-sandbox -> theme -> core. Контекст домена/темы выставляется здесь же
+     * (best effort: без Theme-модуля/БД — только CORE-каскад). Отсутствующий
+     * файл — 404 через модуль Error (п.9: не падать).
+     */
+    private function assetResponse(Request $request): Response
+    {
+        /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
+        $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
+
+        // Контекст запроса для каскада: тема сайта + домен из реестра (мультисайт).
+        $theme  = '';
+        $domain = null;
+        if ($this->container->has(\App\Core\Module\Theme\Contracts\ThemeInterface::class)) {
+            /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+            $themes = $this->container->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+            $host   = strtolower((string) ($request->header('host') ?? ''));
+            $theme  = $themes->resolveForRequest($host);
+            $site   = $themes->site();
+            $domain = $site['domain'] ?? null;
+        }
+        $assets->useContext($domain, $theme !== '' ? $theme : \App\Core\Module\Theme\Theme::DEFAULT_THEME);
+
+        $file = $assets->serve(substr($request->path, strlen('/assets/')));
+        if ($file === null) {
+            return $this->errorPage(404);
+        }
+
+        // Кэш-валидация: ETag по содержимому + Last-Modified по mtime файла.
+        // Условный запрос (If-None-Match / If-Modified-Since) -> 304 без тела:
+        // max-age 86400 + ревалидация = мгновенная раздача после изменения файла
+        // (?v= в URL тоже ломает кэш, см. AssetsRegistry::url).
+        $etag = '"' . md5($file['body']) . '"';
+        $mtime = is_file($file['path']) ? (int) filemtime($file['path']) : time();
+        $headers = [
+            'Content-Type'  => $file['mime'],
+            'Cache-Control' => 'public, max-age=86400',
+            'ETag'          => $etag,
+            'Last-Modified' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT',
+        ];
+
+        $inm = (string) ($request->header('if-none-match') ?? '');
+        $ims = (string) ($request->header('if-modified-since') ?? '');
+        if ($inm !== '' && ($inm === '*' || str_contains($inm, $etag))) {
+            return new Response('', 304, array_intersect_key($headers, array_flip(['ETag', 'Last-Modified'])));
+        }
+        if ($inm === '' && $ims !== '') {
+            $since = strtotime($ims);
+            if ($since !== false && $mtime <= $since) {
+                return new Response('', 304, array_intersect_key($headers, array_flip(['ETag', 'Last-Modified'])));
+            }
+        }
+
+        return (new Response($file['body'], 200))
+            ->withHeader('Content-Type', $headers['Content-Type'])
+            ->withHeader('Cache-Control', $headers['Cache-Control'])
+            ->withHeader('ETag', $headers['ETag'])
+            ->withHeader('Last-Modified', $headers['Last-Modified']);
     }
 
     private function isInstallerPath(string $path): bool
@@ -380,6 +460,23 @@ class Kernel
         if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
             /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
             $views = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+
+            // Статика темы — через реестр Assets (каскад site->theme->core):
+            // регистрируем 'site.css'/'site.js' и публикуем теги в шаблоны.
+            // Файлы темы меняются без правки layout; хук engine.assets.*
+            // даёт модулям дописать своё (п.4). Если файлов нет — в касскаде
+            // совпадения не будет, URL всё равно корректен (404 без ?v=),
+            // а layout темы использует инлайн-fallback.
+            if ($this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+                /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
+                $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
+                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : \App\Core\Module\Theme\Theme::DEFAULT_THEME);
+                $assets->registerStyle('site', 'css/site.css');
+                $assets->registerScript('site', 'js/site.js');
+                $views->share('assetsStyles', $assets->styles());
+                $views->share('assetsScripts', $assets->scripts());
+            }
+
             try {
                 if ($theme !== '') {
                     $views->setTheme($theme);

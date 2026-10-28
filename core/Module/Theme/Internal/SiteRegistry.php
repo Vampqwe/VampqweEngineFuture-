@@ -107,16 +107,31 @@ final class SiteRegistry
                 'SELECT id FROM engine_sites WHERE domain = ?',
                 [$domain]
             );
-            if ($exists === null) {
-                $this->db->run(
-                    'INSERT INTO engine_sites (domain, theme, is_active, created_at) VALUES (?, ?, 1, ?)',
-                    [$domain, $theme, date('c')]
-                );
-            } else {
-                $this->db->run(
-                    'UPDATE engine_sites SET theme = ?, is_active = 1 WHERE domain = ?',
-                    [$theme, $domain]
-                );
+            try {
+                if ($exists === null) {
+                    $this->db->run(
+                        'INSERT INTO engine_sites (domain, theme, title, is_active, created_at) VALUES (?, ?, ?, 1, ?)',
+                        [$domain, $theme, $title, date('c')]
+                    );
+                } else {
+                    $this->db->run(
+                        'UPDATE engine_sites SET theme = ?, title = ?, is_active = 1 WHERE domain = ?',
+                        [$theme, $title, $domain]
+                    );
+                }
+            } catch (\Throwable) {
+                // Старые дампы без колонки title — регистрируем без заголовка.
+                if ($exists === null) {
+                    $this->db->run(
+                        'INSERT INTO engine_sites (domain, theme, is_active, created_at) VALUES (?, ?, 1, ?)',
+                        [$domain, $theme, date('c')]
+                    );
+                } else {
+                    $this->db->run(
+                        'UPDATE engine_sites SET theme = ?, is_active = 1 WHERE domain = ?',
+                        [$theme, $domain]
+                    );
+                }
             }
         } catch (\Throwable) {
             return false;
@@ -153,7 +168,9 @@ final class SiteRegistry
         }
 
         try {
-            // Таблица может не иметь колонки title (старые дампы) — тогда titles пуст.
+            // Таблица может не иметь колонки title (старые дампы) — fallback-запрос
+            // выполняется НАТИВНО: если он тоже упадёт, load() вернёт [] БЕЗ
+            // кэширования, чтобы следующий запрос попробовал снова (п.9).
             try {
                 $rows = $this->db->select(
                     'SELECT domain, theme, title FROM engine_sites WHERE is_active = 1 ORDER BY id'

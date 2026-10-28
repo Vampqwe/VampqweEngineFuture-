@@ -105,6 +105,12 @@ return [
         'provider' => \App\Core\Module\Theme\Providers\ThemeServiceProvider::class,
         'critical' => false,
     ],
+    // Assets: реестр CSS/JS и PHP-раздача статики (Этап 2). Уровень 4+: после
+    // FileSystem/Config; Kernel подключает контекст (домен+тема) на каждом запросе.
+    'Assets' => [
+        'provider' => \App\Core\Module\Assets\Providers\AssetsServiceProvider::class,
+        'critical' => false,
+    ],
     'Queue' => [
         'provider' => \App\Core\Module\Queue\Providers\QueueServiceProvider::class,
         'critical' => false,
@@ -113,6 +119,15 @@ return [
         'provider' => \App\Core\Module\Doctor\Providers\DoctorServiceProvider::class,
         'critical' => false,
     ],
+    // Admin: системная панель администратора (core/Module/Admin, п.1/п.3):
+    // ВСЕГДА активна — это часть движка, а не приложения. Уровень 4+: после
+    // Session/Security/Template/Hook; зависимости от пользовательских модулей
+    // (Auth/Pages/Doctor) — опциональны и ленивы (до установки деградирует честно).
+    'Admin' => [
+        'provider' => \App\Core\Module\Admin\Providers\AdminServiceProvider::class,
+        'critical' => false,
+    ],
+
     'Installer' => [
         'provider' => \App\Core\Module\Installer\Providers\InstallerServiceProvider::class,
         'critical' => false,
@@ -128,12 +143,6 @@ return [
     // Pages: страницы контента (таблица pages). Уровень 5+: после Database/Template/Error.
     'Pages' => [
         'provider' => \App\modules\Pages\Providers\PagesServiceProvider::class,
-        'critical' => false,
-    ],
-    // Admin: панель администратора (/admin/*). Уровень 6+: после Auth/Pages/Doctor —
-    // использует их публичные контракты; все зависимости опциональны (п.2/п.3).
-    'Admin' => [
-        'provider' => \App\modules\Admin\Providers\AdminServiceProvider::class,
         'critical' => false,
     ],
 ];

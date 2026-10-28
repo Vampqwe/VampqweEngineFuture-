@@ -1,15 +1,15 @@
 <?php
 declare(strict_types=1);
 
-namespace App\modules\Admin\Internal;
+namespace App\Core\Module\Admin\Internal;
 
 use App\Core\Module\Hook\Contracts\HookInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
-use App\modules\Admin\Contracts\AdminPanelInterface;
-use App\modules\Admin\Contracts\AdminSectionInterface;
-use App\modules\Admin\Contracts\GuardInterface;
+use App\Core\Module\Admin\Contracts\AdminPanelInterface;
+use App\Core\Module\Admin\Contracts\AdminSectionInterface;
+use App\Core\Module\Admin\Contracts\GuardInterface;
 use RuntimeException;
 
 /**
@@ -113,6 +113,23 @@ final class AdminController implements AdminPanelInterface
         // Контекст шаблонов панели (SCOPE_CORE, view/core/admin/): меню
         // строится ИЗ реестра разделов (п.2), активный пункт — по пути
         // запроса; токен — для форм (CSRF проверяет глобальный middleware ядра).
+        // Статика панели — через реестр Assets (SCOPE_CORE) и хуки
+        // engine.assets.styles/scripts: layout не хардкодит теги, сторонний
+        // модуль может добавить свой CSS панели без правки ядра (п.4).
+        if ($this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+            /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
+            $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
+            $assets->registerStyle('admin', 'css/admin.css', [], \App\Core\Module\Assets\Contracts\AssetsInterface::SCOPE_CORE);
+            $assets->registerScript('admin', 'js/admin.js', [], \App\Core\Module\Assets\Contracts\AssetsInterface::SCOPE_CORE);
+
+            if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
+                $tpl0 = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+                assert($tpl0 instanceof \App\Core\Module\Template\Contracts\TemplateInterface);
+                $tpl0->share('assetsStyles', $assets->styles());
+                $tpl0->share('assetsScripts', $assets->scripts());
+            }
+        }
+
         if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
             $tpl = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
             assert($tpl instanceof \App\Core\Module\Template\Contracts\TemplateInterface);
