@@ -102,7 +102,6 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
             (new CreateEnvStep($this->fs))->handle($this->basePath . '/.env', [
                 'APP_NAME'     => $this->sanitizeName((string) ($options['app_name'] ?? 'VampqweEngineFuture')),
-                'APP_ENV'      => (bool) ($options['debug'] ?? false) ? 'local' : 'production',
                 'APP_DEBUG'    => (bool) ($options['debug'] ?? false) ? 'true' : 'false',
                 'APP_KEY'      => $key,
                 'APP_TIMEZONE' => $this->sanitizeTimezone((string) ($options['timezone'] ?? 'UTC')),
