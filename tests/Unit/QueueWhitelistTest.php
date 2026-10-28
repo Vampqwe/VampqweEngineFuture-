@@ -31,12 +31,14 @@ final class QueueWhitelistTest extends TestCase
      */
     public function testEmptyWhitelistIsNotFrozenByFirstScan(): void
     {
-        // Первый контакт с классом драйвера — вызов статического сканера
-        // (job-классы приложения ещё не загружены): получаем пустой whitelist.
+        // Первый контакт с классом драйвера — вызов статического сканера с
+        // заведомо отсутствующим в whitelist классом: форсируем перескан.
+        // Инвариант: пустой результат не «замораживает» кэш — последующий
+        // roundtrip обязан пересобрать whitelist и найти реальный джоб.
         $scan = new \ReflectionMethod(FileQueueDriver::class, 'allowedJobClasses');
         $scan->setAccessible(true);
         /** @var list<string> $first */
-        $first = $scan->invoke(null);
+        $first = $scan->invoke(null, 'Tests\Unit\NotLoadedYetJob_' . bin2hex(random_bytes(4)));
 
         // Полный roundtrip обязан работать независимо от того, был ли первый
         // скан пустым (до загрузки классов) или непустым.
