@@ -1,1 +1,41 @@
-storage/
+# Зависимости и артефакты сборки
+/vendor/
+composer.lock
+
+# Секреты и локальное окружение
+.env
+
+# Рабочие данные движка: в git — только структура (папки + .gitkeep)
+/storage/cache/*
+!/storage/cache/.gitkeep
+!/storage/cache/templates/
+/storage/database/*
+!/storage/database/.gitkeep
+/storage/sessions/*
+!/storage/sessions/.gitkeep
+/storage/queue/*
+!/storage/queue/.gitkeep
+/storage/backups/*
+!/storage/backups/.gitkeep
+/storage/uploads/*
+!/storage/uploads/.gitkeep
+/storage/logs/*
+!/storage/logs/.gitkeep
+# Служебные файлы состояния (пересоздаются инсталлером, не часть кода)
+/storage/.installed
+/storage/.maintenance
+/storage/.updating
+/storage/.error
+/storage/.session_store.file
+
+# Логи по датам (пишутся ядром вне репозитория кода)
+/logs/
+
+# Служебные файлы ОС/редакторов
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Артефакты разработки
+*.bundle
