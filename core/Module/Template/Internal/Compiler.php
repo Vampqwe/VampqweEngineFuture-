@@ -19,79 +19,123 @@ use InvalidArgumentException;
  */
 final class Compiler
 {
+    /** Версия синтаксиса компилятора — входит в ключ кэша (см. CacheStore). */
+    public const SYNTAX_VERSION = '2';
+
+    /** Теги PHP собраны из частей: файл компилятора не должен содержать их литералов. */
+    private const TAG_OPEN = "<?php ";
+    private const TAG_CLOSE = " ?>";
+
+    /** Маркеры произвольного PHP между @php и @endphp. */
+    private const RAW_PHP    = "\x01VAMPRAWPHP\x01";
+    private const RAW_ENDPHP = "\x01VAMPRAWEND\x01";
+
     /** Кэш компиляции строки (для renderString). */
     private array $stringCache = [];
 
     public function compile(string $source): string
     {
+        // 0. Плейсхолдерим управляющие последовательности (@directive), чтобы
+        // ни один из проходов (вывод/директивы) не сканировал чужие стадии:
+        // подстановки с тегами PHP больше не встретят '@section' внутри
+        // себя, а email-подобный текст 'a@if' не будет съеден как директива.
+        $directives = [];
+        $masked = preg_replace_callback(
+            '/@([a-zA-Z]+)\s*(?:\(((?:[^()]|\([^()]*\))*)\))?/',
+            static function (array $m) use (&$directives): string {
+                $key = '___DIR' . count($directives) . '___';
+                $directives[$key] = $m[0];
+                return $key;
+            },
+            $source
+        ) ?? $source;
+
         // 1. Сохраняем raw-вывод {!! ... !!} заглушками, чтобы он не мешал {{ }}.
         $raws = [];
-        $source = preg_replace_callback(
+        $masked = preg_replace_callback(
             '/\{!!\s*(.+?)\s*!!\}/su',
             static function (array $m) use (&$raws): string {
                 $key = '___RAW' . count($raws) . '___';
                 $raws[$key] = $m[1];
                 return $key;
             },
-            $source
-        ) ?? $source;
+            $masked
+        ) ?? $masked;
 
         // 2. Экранированный вывод {{ ... }}.
-        $source = preg_replace(
+        $masked = preg_replace(
             '/\{\{\s*(.+?)\s*\}\}/su',
-            '<?php echo $this->e($1); ?>',
-            $source
-        ) ?? $source;
+            static fn(array $m): string => self::TAG_OPEN . "echo \$this->e(" . $m[1] . self::TAG_CLOSE,
+            $masked
+        ) ?? $masked;
 
         // 3. Возврат raw-вывода.
         foreach ($raws as $key => $expr) {
-            $source = str_replace($key, '<?php echo (' . $expr . '); ?>', $source);
+            $masked = str_replace($key, self::TAG_OPEN . 'echo (' . $expr . ');' . self::TAG_CLOSE, $masked);
         }
 
-        // 4. Управляющие директивы (порядок важен: сначала закрытия).
-        // Инлайн-форма @section('name') ... @show — захват и немедленный вывод
-        // (так пишут в layout'ах); блочная @section ... @endsection — только захват
-        // (так пишут дочерние шаблоны). Без обработки @show его аргумент сливался
-        // с предыдущим @section через ленивый .+? — секции ломались.
-        $inlineShows = [];
-        if (preg_match_all('/@section\(([^)]+)\)(.*?)@show/su', $source, $m, PREG_SET_ORDER)) {
-            foreach ($m as $i => $one) {
-                $key = '@@VAMPSHOW' . $i . '@@';
-                $inlineShows[$key] = $one;
-                $source = str_replace($one[0], $key, $source);
-            }
-        }
-
-        $patterns = [
-            '/@extends\(\s*(.+?)\s*\)/'                          => '<?php $this->extend($1); ?>',
-            '/@section\(\s*(.+?)\s*\)/'                          => '<?php $this->startSection($1); ?>',
-            '/@endsection/'                                      => '<?php $this->stopSection(); ?>',
-            '/@yield\(([^)]*)\)/'                            => '<?php echo $this->yieldSection($1); ?>',
-            '/@include\(\s*(.+?)\s*\)/'                          => '<?php echo $this->renderPartial($1); ?>',
-            '/@if\(\s*(.+?)\s*\)/'                               => '<?php if ($1): ?>',
-            '/@elseif\(\s*(.+?)\s*\)/'                           => '<?php elseif ($1): ?>',
-            '/@else/'                                            => '<?php else: ?>',
-            '/@endif/'                                           => '<?php endif; ?>',
-            '/@foreach\(\s*(.+?)\s*\)/'                          => '<?php foreach ($1): ?>',
-            '/@endforeach/'                                      => '<?php endforeach; ?>',
-            '/@for\(\s*(.+?)\s*\)/'                              => '<?php for ($1): ?>',
-            '/@endfor/'                                          => '<?php endfor; ?>',
-            '/@php/'                                             => '<?php ',
-            '/@endphp/'                                          => ' ?>',
+        // 4. Управляющие директивы (разворачиваем плейсхолдеры).
+        //
+        // Каждая директива компилируется ровно один раз из исходного текста:
+        // стадия 0 уже спрятала все вхождения '@directive(...)' в невидимые для
+        // остальных проходов плейсхолдеры, поэтому подстановки с тегами PHP
+        // больше не сканируются последующими правилами (прежняя схема «preg_replace
+        // по очереди на каждую директиву» систематически ломала секции: аргументы
+        // соседних @section сливались ленивым квантификатором и контент страницы
+        // терялся — баг инсталлятора: пустые формы вместо wizard'а).
+        $directiveMap = [
+            'extends'    => '$this->extend({ARGS});',
+            'section'    => '$this->startSection({ARGS});',
+            'endsection' => '$this->stopSection();',
+            'show'       => '$this->stopSection(); echo $this->yieldSection($this->lastSectionName());',
+            'stop'       => '$this->stopSection();',
+            'yield'      => 'echo $this->yieldSection({ARGS});',
+            'include'    => 'echo $this->renderPartial({ARGS});',
+            'if'         => 'if ({ARGS}):',
+            'elseif'     => 'elseif ({ARGS}):',
+            'else'       => 'else:',
+            'endif'      => 'endif;',
+            'foreach'    => 'foreach ({ARGS}):',
+            'endforeach' => 'endforeach;',
+            'for'        => 'for ({ARGS}):',
+            'endfor'     => 'endfor;',
+            'while'      => 'while ({ARGS}):',
+            'endwhile'   => 'endwhile;',
+            'php'        => self::RAW_PHP . '{ARGS}',
+            'endphp'     => self::RAW_ENDPHP,
         ];
-        foreach ($patterns as $pattern => $replacement) {
-            $source = preg_replace($pattern, $replacement, $source) ?? $source;
+
+        $compiled = $masked;
+        foreach ($directives as $key => $original) {
+            if (!preg_match('/^@([a-zA-Z]+)\s*(?:\(((?:[^()]|\([^()]*\))*)\))?$/', $original, $m)) {
+                continue;
+            }
+            $name = strtolower($m[1]);
+            if (!isset($directiveMap[$name])) {
+                continue; // неизвестная директива остаётся как есть (email, @media...)
+            }
+            $args  = isset($m[2]) && trim($m[2]) !== '' ? trim($m[2]) : '';
+            $shape = $directiveMap[$name];
+
+            if (str_contains($shape, '{ARGS}')) {
+                if ($args === '') {
+                    throw new InvalidArgumentException("Директивe [" . $name . "] нужны аргументы в скобках.");
+                }
+                $php = self::TAG_OPEN . str_replace('{ARGS}', $args, $shape) . self::TAG_CLOSE;
+            } else {
+                // Директивы без аргументов (@endsection, @show, @else...) могут
+                // случайно встретить '(' — тогда это НЕ их аргумент: возвращаем
+                // скобки обратно в HTML-текст.
+                $php = self::TAG_OPEN . $shape . self::TAG_CLOSE . ($args === '' ? '' : '(' . $m[2] . ')');
+            }
+            $compiled = str_replace($key, $php, $compiled);
         }
 
-        // Разворачиваем инлайн-секции: startSection → тело → stopSection → echo.
-        foreach ($inlineShows as $key => $one) {
-            $php = '<?php $this->startSection(' . trim($one[1]) . '); ?>'
-                 . $one[2]
-                 . '<?php $this->stopSection(); echo $this->yieldSection(' . trim($one[1]) . '); ?>';
-            $source = str_replace($key, $php, $source);
-        }
+        // @php ... @endphp: произвольный PHP между ними — без экранирования.
+        $compiled = str_replace(self::RAW_PHP, '', $compiled);
+        $compiled = str_replace(self::RAW_ENDPHP, '', $compiled);
 
-        return $source;
+        return $compiled;
     }
 
     /** Компиляция строкового шаблона с кэшем по содержимому. */
