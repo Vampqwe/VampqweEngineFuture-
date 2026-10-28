@@ -3,24 +3,26 @@ declare(strict_types=1);
 
 namespace App\Core\System\Http\Middleware;
 
-use App\Core\Module\Error\Contracts\ErrorPageInterface;
-use App\Core\Module\Session\Contracts\SessionInterface;
 use App\Core\System\Http\MiddlewareInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
+use App\Core\System\Support\ModuleBridge;
 
 /**
  * Глобальный middleware обеих «дорог» (п.4 Конституции): CSRF-защита POST/PUT/PATCH/DELETE.
  * Системная дорога инсталлятора (/install*) исключается — там ещё нет сессий.
  * Токен: поле _csrf в POST или заголовок X-CSRF-Token.
+ *
+ * Знание о модулях Session/Error — строго через ModuleBridge (правило R6b).
+ * Деградация честная (п.9): без Session или Error middleware прозрачно
+ * пропускает запрос (Kernel собирает его только когда обе способности есть).
  */
 final class CsrfProtect implements MiddlewareInterface
 {
     private const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'];
 
     public function __construct(
-        private readonly SessionInterface $session,
-        private readonly ErrorPageInterface $errorPages
+        private readonly ModuleBridge $bridge
     ) {
     }
 
@@ -33,9 +35,14 @@ final class CsrfProtect implements MiddlewareInterface
             return $next($request);
         }
 
+        $session = $this->bridge->session();
+        if ($session === null) {
+            return $next($request);
+        }
+
         $token = $request->header('X-CSRF-Token') ?? ($request->post['_csrf'] ?? null);
-        if (!$this->session->validateCsrf(is_string($token) ? $token : null)) {
-            return new Response($this->errorPages->render(419), 419);
+        if (!$session->validateCsrf(is_string($token) ? $token : null)) {
+            return new Response($this->bridge->errorPage(419), 419);
         }
 
         return $next($request);

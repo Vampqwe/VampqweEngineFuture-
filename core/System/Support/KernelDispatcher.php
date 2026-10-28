@@ -3,9 +3,6 @@ declare(strict_types=1);
 
 namespace App\Core\System\Support;
 
-use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
-use App\Core\Module\Template\Contracts\TemplateInterface;
-use App\Core\Module\Theme\Contracts\ThemeInterface;
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
 
@@ -90,7 +87,7 @@ final class KernelDispatcher
             // а layout темы использует инлайн-fallback.
             $assets = $this->bridge->assets();
             if ($assets !== null) {
-                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : ThemeInterface::DEFAULT_THEME);
+                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : $this->bridge->defaultTheme());
                 $assets->registerStyle('site', 'css/site.css', [], 'head');
                 $assets->registerScript('site', 'js/site.js', [], 'footer');
                 $views->share('assetsStyles', $assets->styles());
@@ -109,7 +106,7 @@ final class KernelDispatcher
                     'dbDriver'   => $dbDriver,
                     'dbError'    => $dbError,
                     'site'       => $site,
-                ], TemplateInterface::SCOPE_APP);
+                ], $this->bridge->scopeApp());
                 return new Response($body, $status);
             } catch (\Throwable $e) {
                 // сломанный шаблон не должен ронять движок — уходим в fallback-текст
@@ -130,7 +127,7 @@ final class KernelDispatcher
      * рендер уйдёт через fallback '_default' — движок не падает (принцип п.9).
      */
     private function cloneStarter(
-        FileSystemInterface $fs,
+        object $fs,
         string $source,
         string $target,
     ): bool {
