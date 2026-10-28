@@ -1,0 +1,12 @@
+@extends('layouts/installer')
+@section('title') Установка завершена @endsection
+@section('content')
+<h1>Установка завершена</h1>
+<div class="success">Движок установлен и готов к работе!</div>
+<table>
+@foreach($summary as $k => $v)
+    <tr><td>{{ (string) $k }}</td><td><code>{{ is_bool($v) ? ($v ? 'да' : 'нет') : (string) $v }}</code></td></tr>
+@endforeach
+</table>
+<a href="/">&rarr; Открыть сайт</a>
+@endsection
