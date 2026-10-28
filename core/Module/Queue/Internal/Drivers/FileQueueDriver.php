@@ -113,10 +113,16 @@ final class FileQueueDriver implements DriverInterface
      * JobInterface проекта (скан один раз на процесс). Защита от POP-вектора:
      * доступ к storage/queue не должен позволять инстанцировать произвольные классы.
      *
-     * @return list<string>|true  true — если конкретных классов ещё нет (первый запуск);
-     *         чужие объекты всё равно отсекаются проверкой instanceof JobInterface ниже.
+     * ВАЖНО: allowed_classes всегда массив. Возврат true означал бы «разрешить
+     * любые классы» и ломал whitelist при пустом наборе реализаций; в union-типе
+     * array|true PHP парсит `true` как имя класса (зарезервированное слово) — fatal error.
+     * Если конкретных классов ещё нет (первый запуск), возвращаем пустой список:
+     * unserialize тогда превращает объекты в __PHP_Incomplete_Class, а последующая
+     * проверка instanceof JobInterface корректно отправляет payload в failed/.
+     *
+     * @return list<string>
      */
-    private static function allowedJobClasses(): array|true
+    private static function allowedJobClasses(): array
     {
         static $cache = null;
         if ($cache !== null) {
@@ -130,7 +136,7 @@ final class FileQueueDriver implements DriverInterface
             }
         }
 
-        return $cache = ($allowed === []) ? true : $allowed;
+        return $cache = $allowed;
     }
 
     /** Повреждённый reserved-файл -> failed/ с пояснением. */
