@@ -49,6 +49,19 @@ final class Compiler
         }
 
         // 4. Управляющие директивы (порядок важен: сначала закрытия).
+        // Инлайн-форма @section('name') ... @show — захват и немедленный вывод
+        // (так пишут в layout'ах); блочная @section ... @endsection — только захват
+        // (так пишут дочерние шаблоны). Без обработки @show его аргумент сливался
+        // с предыдущим @section через ленивый .+? — секции ломались.
+        $inlineShows = [];
+        if (preg_match_all('/@section\(([^)]+)\)(.*?)@show/su', $source, $m, PREG_SET_ORDER)) {
+            foreach ($m as $i => $one) {
+                $key = '@@VAMPSHOW' . $i . '@@';
+                $inlineShows[$key] = $one;
+                $source = str_replace($one[0], $key, $source);
+            }
+        }
+
         $patterns = [
             '/@extends\(\s*(.+?)\s*\)/'                          => '<?php $this->extend($1); ?>',
             '/@section\(\s*(.+?)\s*\)/'                          => '<?php $this->startSection($1); ?>',
@@ -68,6 +81,14 @@ final class Compiler
         ];
         foreach ($patterns as $pattern => $replacement) {
             $source = preg_replace($pattern, $replacement, $source) ?? $source;
+        }
+
+        // Разворачиваем инлайн-секции: startSection → тело → stopSection → echo.
+        foreach ($inlineShows as $key => $one) {
+            $php = '<?php $this->startSection(' . trim($one[1]) . '); ?>'
+                 . $one[2]
+                 . '<?php $this->stopSection(); echo $this->yieldSection(' . trim($one[1]) . '); ?>';
+            $source = str_replace($key, $php, $source);
         }
 
         return $source;
