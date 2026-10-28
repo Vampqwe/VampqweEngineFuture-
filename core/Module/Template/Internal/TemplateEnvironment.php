@@ -23,18 +23,42 @@ final class TemplateEnvironment
     /** @var string[] стек открытых секций */
     private array $sectionStack = [];
 
+    /** @var string[] имена последних закрытых секций (для @show без аргумента) */
+    private array $lastSectionNames = [];
+
     /** @var string|null имя layout, объявленного через @extends */
     private ?string $layout = null;
 
     /** @var array<string,string> секции, переданные из дочернего шаблона в layout */
     private array $inheritedSections = [];
 
+    /**
+     * Разделитель вызовов: true — этот env является «родительским» (тот, что
+     * объявил @extends). Дочерние env (создаваемые Template::renderFile для
+     * layout/partial) получают его равным false и обязаны вернуть захваченные
+     * секции наверх через pullSections() — иначе @yield в layout теряет контент.
+     */
+    private bool $isRoot;
+
     public function __construct(
         private readonly Compiler $compiler,
         private readonly Escaper $escaper,
         /** @var callable(string, array<string,mixed>): string рендер имени по текущему site/theme */
         private $nameRenderer,
+        bool $isRoot = true,
     ) {
+        $this->isRoot = $isRoot;
+    }
+
+    /**
+     * Секции, захваченные этим окружением (для переноса родителю после рендера
+     * layout/partial). Вызывается Template::renderFile после env->render().
+     *
+     * @return array<string,string>
+     */
+    public function pullSections(): array
+    {
+        return $this->sections;
     }
 
     public function share(array $globals): void
@@ -45,9 +69,26 @@ final class TemplateEnvironment
     /** Точка входа: отрендерить PHP-код скомпилированного шаблона. */
     public function render(string $compiledPhp, array $data): string
     {
-        $this->reset();
+        // Вложенные окружения (layout/partial, создаваемые Template::renderFile)
+        // наследуют секции родителя — их нельзя сбрасывать, иначе @yield в layout
+        // потеряет контент дочернего шаблона (баг инсталлятора: пустые страницы).
+        if ($this->isRoot) {
+            $this->reset();
+        } else {
+            $this->sections = array_merge($this->inheritedSections, $this->sections);
+        }
+
         $output = $this->evaluate($compiledPhp, $data);
 
+        // Если этот env НЕ корневой (его создал Template::renderFile для
+        // layout/partial), то layout уже отрендерился внутри evaluate() через
+        // рекурсивный вызов nameRenderer -> render(). В этом случае секции,
+        // захваченные здесь, должны быть переданы родителю через pullSections().
+        if (!$this->isRoot) {
+            return $output;
+        }
+
+        // Корневой env: обрабатываем @extends двухпроходным рендером.
         // Двухпроходный рендер: если шаблон объявил @extends('layout'),
         // рендерим layout, вставляя наши секции. Цикл с защитой от 10 уровней
         // наследования (layout может сам наследоваться от другого layout).
@@ -67,6 +108,9 @@ final class TemplateEnvironment
             $this->inheritedSections = $inherited;
             $this->sections          = $inherited;
 
+            // Layout рендерится ВНУТРИ нового env (как partial), чтобы его @yield
+            // видел секции, которые мы передали выше. Но так как layout не должен
+            // создавать свой layout-цикл (он сам layout), we pass isRoot=false.
             $layoutPhp = ($this->nameRenderer)($layoutName, []);
             $output    = $this->evaluate($layoutPhp, $data);
         }
@@ -137,6 +181,12 @@ final class TemplateEnvironment
         ob_start();
     }
 
+    /** Имя последней закрытой секции (@show без аргумента). */
+    public function lastSectionName(): string
+    {
+        return (string) ($this->lastSectionNames[count($this->lastSectionNames) - 1] ?? '');
+    }
+
     public function stopSection(): void
     {
         $name     = array_pop($this->sectionStack);
@@ -145,6 +195,7 @@ final class TemplateEnvironment
             throw new RuntimeException('@endsection без @section.');
         }
         $this->sections[$name] = ($this->sections[$name] ?? '') . $content;
+        $this->lastSectionNames[] = $name;
     }
 
     public function yieldSection(string $name, string $default = ''): string
