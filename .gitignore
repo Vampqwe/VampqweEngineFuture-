@@ -1,4 +1,1 @@
-storage/cache/
-*.sqlite
-.env
-storage/.session_store.file
+storage/.installed
