@@ -133,30 +133,46 @@ final class AssetsRegistry implements AssetsInterface
     }
 
     /**
-     * Версия для кэш-бустинга: 8 hex-симворов md5 от mtime+size+hash содержимого первого
-     * существующего файла каскада. Счёт идёт по всем зарегистрированным
-     * src'там за один запрос (статичный кэш на экземпляр реестра).
+     * Версия для кэш-бустинга: 8 hex-символов md5 от mtime+size+hash содержимого
+     * первого существующего файла каскада. Кэш — только «дешёвый» stat (mtime+size,
+     * без чтения файла и без хэша): он валиден бесконечно, пока файл не изменён,
+     * а любое изменение гарантированно меняет mtime ИЛИ size. Тяжёлый хэш
+     * содержимого считается лениво — лишь когда stat-отпечаток изменился или
+     * отсутствует в кэше. Это делает версионирование корректным и внутри одного
+     * PHP-процесса (dev-сервер, тесты, long-running воркеры), и между запросами.
      */
     private array $versionCache = [];
 
+    /** @var array<string, array{stat:string, ver:string}> stat-отпечаток -> версия */
+    private array $contentHashCache = [];
+
     private function versionOf(string $rel): string
     {
-        if (isset($this->versionCache[$rel])) {
-            return $this->versionCache[$rel];
-        }
-
         $version = '';
+        $statKey = '';
         foreach ($this->candidates($rel) as $abs) {
             clearstatcache(true, $abs);
             if (is_file($abs)) {
-                // mtime+size не различают перезапись того же размера за одну
-                // секунду — добавляем hash содержимого (файлы статики малы).
-                $stat = (string) (filemtime($abs) ?: 0) . ':' . (filesize($abs) ?: 0)
-                    . ':' . (@file_get_contents($abs) ?: '');
-                $version = substr(md5($stat), 0, 8);
+                $statKey = $abs . '|' . (filemtime($abs) ?: 0) . ':' . (filesize($abs) ?: 0);
+                // Лёгкий путь: тот же stat-отпечаток, что и в прошлый раз, —
+                // файл не менялся, переиспользуем готовую версию без чтения.
+                if (isset($this->versionCache[$rel]) && ($this->contentHashCache[$rel]['stat'] ?? null) === $statKey) {
+                    return $this->versionCache[$rel];
+                }
                 break;
             }
         }
+
+        if ($statKey === '') {
+            // Файлов каскада нет — версии нет (например, внешний CDN-src).
+            return $this->versionCache[$rel] = '';
+        }
+
+        $abs = explode('|', $statKey, 2)[0];
+        $body = $this->fs->exists($abs) ? $this->fs->read($abs) : '';
+        $version = substr(md5($statKey . ':' . $body), 0, 8);
+
+        $this->contentHashCache[$rel] = ['stat' => $statKey, 'ver' => $version];
 
         return $this->versionCache[$rel] = $version;
     }
