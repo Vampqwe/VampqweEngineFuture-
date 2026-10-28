@@ -23,12 +23,12 @@ final class Compiler
     public const SYNTAX_VERSION = '2';
 
     /** Теги PHP собраны из частей: файл компилятора не должен содержать их литералов. */
-    private const TAG_OPEN = "<?php ";
-    private const TAG_CLOSE = " ?>";
+    private const TAG_OPEN = '<?php ';
+    private const TAG_CLOSE = ' ?>';
 
-    /** Маркеры произвольного PHP между @php и @endphp. */
-    private const RAW_PHP    = "\x01VAMPRAWPHP\x01";
-    private const RAW_ENDPHP = "\x01VAMPRAWEND\x01";
+    /** Маркеры произвольного PHP между @php и @endphp (склеены: файл не должен содержать их литералов). */
+    private const RAW_PHP    = '<?p' . 'hp ' . "\x01VAMPRAWPHP\x01";
+    private const RAW_ENDPHP = "\x01VAMPRAWEND\x01" . ' ?' . '>';
 
     /** Кэш компиляции строки (для renderString). */
     private array $stringCache = [];
@@ -63,9 +63,9 @@ final class Compiler
         ) ?? $masked;
 
         // 2. Экранированный вывод {{ ... }}.
-        $masked = preg_replace(
+        $masked = preg_replace_callback(
             '/\{\{\s*(.+?)\s*\}\}/su',
-            static fn(array $m): string => self::TAG_OPEN . "echo \$this->e(" . $m[1] . self::TAG_CLOSE,
+            static fn(array $m): string => self::TAG_OPEN . "echo \$this->e(" . $m[1] . ');' . self::TAG_CLOSE,
             $masked
         ) ?? $masked;
 
@@ -106,6 +106,18 @@ final class Compiler
         ];
 
         $compiled = $masked;
+
+        // Блочные директивы @php ... @endphp: произвольный PHP без скобок.
+        // Обрабатываются до основной карты (у них нет {ARGS}). Сравнение — по
+        // имени: в $directives под ключом лежит матч ВМЕСТЕ с захваченными
+        // пробелами ('@php '), точное равенство '@php' не срабатывало.
+        foreach ($directives as $key => $original) {
+            if (!preg_match('/^@(php|endphp)$/i', trim($original), $bm)) {
+                continue;
+            }
+            $compiled = str_replace($key, strtolower($bm[1]) === 'php' ? self::RAW_PHP : self::RAW_ENDPHP, $compiled);
+        }
+
         foreach ($directives as $key => $original) {
             if (!preg_match('/^@([a-zA-Z]+)\s*(?:\(((?:[^()]|\([^()]*\))*)\))?$/', $original, $m)) {
                 continue;
@@ -113,6 +125,9 @@ final class Compiler
             $name = strtolower($m[1]);
             if (!isset($directiveMap[$name])) {
                 continue; // неизвестная директива остаётся как есть (email, @media...)
+            }
+            if ($name === 'php' || $name === 'endphp') {
+                continue; // уже заменены маркерами выше
             }
             $args  = isset($m[2]) && trim($m[2]) !== '' ? trim($m[2]) : '';
             $shape = $directiveMap[$name];
