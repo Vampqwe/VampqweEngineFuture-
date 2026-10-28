@@ -85,7 +85,7 @@
 ├── logs/            ← логи по каналам: logs/<дата>/<Модуль>.log
 ├── database/        ← SQL-дампы схемы (db.sql)
 ├── migrations/      ← версии схемы БД (<ГГГГ_ММ_ДД_HHMMSS>_имя.php)
-├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T3, SecretLeakCheck)
+├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T4, SecretLeakCheck)
 ├── docs/            ← CONSTITUTION.md — реестр «правило → чем проверяется» (Теорема синхронизации)
 ├── .github/workflows/ci.yml ← merge-gate: lint-rules ∧ test ∧ doctor (sqlite-стенд из .env.example)
 ├── bin/             ← CLI: php bin/engine doctor | migrate | sites | site:add | test | lint-rules
@@ -102,7 +102,7 @@
 
 > `lint-rules exit 0` **∧** `test exit 0` ⇒ код соответствует Конституции (п.1–п.10).
 
-Реестр доказательств «правило → линтер R1–R11 / тест T1–T3» и легальные исключения
+Реестр доказательств «правило → линтер R1–R11 / тест T1–T4» и легальные исключения
 (аннотации `@constitution-exception`) — в [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md);
 формулировка теоремы продублирована в PHPDoc `ArchitectureLinter`. Нарушение, которое
 не ловится ни одной проверкой, считается слепым пятном теоремы и закрывается новым
