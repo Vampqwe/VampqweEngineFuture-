@@ -10,7 +10,7 @@ namespace App\Core\Module\Security\Contracts;
 interface SecurityInterface
 {
     /** Надёжный случайный токен заданной длины (hex). */
-    public function randomToken(int $bytes = 32): string;
+    public function randomToken(int $bytes): string;
 
     /** Хешировать пароль (argon2id/bcrypt — по конфигу). */
     public function hashPassword(string $password): string;

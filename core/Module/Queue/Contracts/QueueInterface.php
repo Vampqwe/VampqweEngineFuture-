@@ -10,7 +10,7 @@ namespace App\Core\Module\Queue\Contracts;
 interface QueueInterface
 {
     /** Поставить задачу в очередь; $delay — секунд до готовности. Возвращает id. */
-    public function push(JobInterface $job, int $delay = 0): string;
+    public function push(JobInterface $job, int $delay): string;
 
     /** Взять следующую готовую задачу (или null, если пусто). */
     public function pop(): ?JobInterface;
@@ -19,7 +19,7 @@ interface QueueInterface
     public function ack(string $jobId): bool;
 
     /** Вернуть задачу в очередь с задержкой (retry). */
-    public function retry(string $jobId, int $delaySeconds = 60): bool;
+    public function retry(string $jobId, int $delaySeconds): bool;
 
     /** Задача провалена навсегда: переносится в failed/. */
     public function fail(string $jobId, \Throwable $error): bool;

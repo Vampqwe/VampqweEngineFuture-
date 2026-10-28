@@ -19,13 +19,13 @@ interface DatabaseInterface
     public function rollBack(): void;
 
     /** Выполнить запрос с привязкой параметров (подготовленное выражение). @return int затронутых строк */
-    public function run(string $sql, array $bindings = []): int;
+    public function run(string $sql, array $bindings): int;
 
     /** Запрос, возвращающий массив строк. */
-    public function select(string $sql, array $bindings = []): array;
+    public function select(string $sql, array $bindings): array;
 
     /** Запрос, возвращающий первую строку или null. */
-    public function selectOne(string $sql, array $bindings = []): ?array;
+    public function selectOne(string $sql, array $bindings): ?array;
 
     /** Построитель запросов (возвращается как object — точный тип появится с реализацией). */
     public function query(string $table): object;

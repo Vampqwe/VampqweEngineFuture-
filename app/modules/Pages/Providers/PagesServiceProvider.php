@@ -8,6 +8,7 @@ use App\Core\Module\Error\Contracts\ErrorPageInterface;
 use App\Core\Module\Template\Contracts\TemplateInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Contracts\ModuleProviderInterface;
+use App\modules\Pages\Contracts\PageRendererInterface;
 use App\modules\Pages\Contracts\PageRepositoryInterface;
 use App\modules\Pages\PageController;
 use App\modules\Pages\PageRepository;
@@ -38,7 +39,9 @@ class PagesServiceProvider implements ModuleProviderInterface
             return new PageRepository($c->get(DatabaseInterface::class));
         });
 
-        $container->bind(PageController::class, static function (ContainerInterface $c): PageController {
+        // Публичная HTTP-граница модуля — контракт PageRendererInterface:
+        // ядро подключает /{slug} только по нему (п.1 Конституции).
+        $container->bind(PageRendererInterface::class, static function (ContainerInterface $c): PageRendererInterface {
             return new PageController(
                 $c->has(PageRepositoryInterface::class) ? $c->get(PageRepositoryInterface::class) : null,
                 $c->has(TemplateInterface::class) ? $c->get(TemplateInterface::class) : null,

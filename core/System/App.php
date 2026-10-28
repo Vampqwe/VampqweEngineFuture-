@@ -44,17 +44,14 @@ class App
     {
         $this->container->instance(ContainerInterface::class, $this->container);
 
-        $this->container->instance('base_path', BASE_PATH);
-
         // Единая точка правды о путях (п.7 Конституции): все пути объявлены
         // только в Support\Paths::MAP и регистрируются в контейнер оттуда.
         // Потребители получают их по ключам ('config_path', 'logs_path', ...),
         // никаких конкатенаций BASE_PATH . '/...' в ядре и модулях быть не должно.
+        // Ключ 'base' даёт base_path — единственный путь, из которого потом
+        // собираются служебные файлы (.env, маркеры состояния).
         $paths = new Paths(BASE_PATH);
         foreach ($paths->all() as $key => $absolute) {
-            if ($key === 'base') {
-                continue; // base_path уже зарегистрирован выше
-            }
             $this->container->instance($key . '_path', $absolute);
         }
         unset($absolute);

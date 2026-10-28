@@ -24,7 +24,7 @@ interface ParserInterface
      *
      * @param array<int|string,mixed> $data
      */
-    public function encode(array $data, string $format, bool $pretty = false): string;
+    public function encode(array $data, string $format, bool $pretty): string;
 
     /** Поддерживается ли данный формат? */
     public function supports(string $format): bool;

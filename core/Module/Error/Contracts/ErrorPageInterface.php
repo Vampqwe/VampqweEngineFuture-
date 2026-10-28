@@ -10,7 +10,7 @@ namespace App\Core\Module\Error\Contracts;
 interface ErrorPageInterface
 {
     /** Отрендерить HTML страницы ошибки по HTTP-коду. */
-    public function render(int $statusCode, ?\Throwable $exception = null): string;
+    public function render(int $statusCode, ?\Throwable $exception): string;
 
     /** Зарегистрировать пользовательский шаблон для кода (например, 404 => 'errors/my-404'). */
     public function extend(int $statusCode, string $template): void;

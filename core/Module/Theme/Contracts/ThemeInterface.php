@@ -40,13 +40,13 @@ interface ThemeInterface
      *
      * @return array{domain:string,theme:string,title:string}|null
      */
-    public function site(?string $host = null): ?array;
+    public function site(?string $host): ?array;
 
     /**
      * Зарегистрировать сайт в реестре (домен -> тема). Идемпотентно по домену.
      * false — если БД недоступна/не установлена или таблица не пишет.
      */
-    public function registerSite(string $domain, string $theme, string $title = ''): bool;
+    public function registerSite(string $domain, string $theme, string $title): bool;
 
     /** Немедленно переключить шаблонизатор на тему (без проверки домена). */
     public function use(string $theme): void;

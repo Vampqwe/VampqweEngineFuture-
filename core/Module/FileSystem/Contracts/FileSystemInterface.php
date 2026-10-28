@@ -11,8 +11,8 @@ interface FileSystemInterface
     public function isWritable(string $path): bool;
     public function isReadable(string $path): bool;
     
-    public function createDirectory(string $path, int $permissions = 0755): bool;
-    public function createFile(string $path, string $content = ''): bool;
+    public function createDirectory(string $path, int $permissions): bool;
+    public function createFile(string $path, string $content): bool;
     public function delete(string $path): bool;
     public function deleteDirectory(string $path): bool;
     

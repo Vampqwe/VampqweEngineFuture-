@@ -19,7 +19,7 @@ interface AuthRepositoryInterface
     public function findById(int $id): ?array;
 
     /** Создать пользователя; возвращает id новой записи или null при конфликте email. */
-    public function create(string $email, string $password, string $name = ''): ?int;
+    public function create(string $email, string $password, string $name): ?int;
 
     /** Проверка пароля по храну (время-постоянная внутри password_verify). */
     public function verifyPassword(array $user, string $password): bool;
