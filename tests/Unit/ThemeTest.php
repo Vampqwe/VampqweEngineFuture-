@@ -70,15 +70,20 @@ final class ThemeTest extends TestCase
         $this->assertSame('animals', $theme->resolveForRequest('other.test'));
 
         // 6. Тема из реестра без папки -> деградация на '_default' (движок не падает).
+        //    Возвращается '_default' (а не ''): Kernel должен отличать
+        //    «переключили на фолбэк» от «не переключали» — иначе утечка темы
+        //    между доменами при повторном резолве в одном запросе.
         $theme->registerSite('bloggs.test', 'bloggs');
-        $this->assertSame('', $theme->resolveForRequest('bloggs.test'));
+        $this->assertSame('_default', $theme->resolveForRequest('bloggs.test'));
         $this->assertSame('_default', $theme->current());
         $this->assertSame('bloggs', $theme->site()['theme'], 'Карточка сайта при этом сохранена.');
 
         // 7. Эвристика поддомена при недоступной БД (реестр пуст).
         $offline = new Theme($views, new SiteRegistry(null), new FileSystem(), $appView, '_default');
         $this->assertSame('animals', $offline->resolveForRequest('animals.localhost'));
-        $this->assertSame('_default', $offline->resolveForRequest('localhost'));
+        // Голый 'localhost' — не поддомен: НЕ переключали (''), активна дефолтная тема.
+        $this->assertSame('', $offline->resolveForRequest('localhost'));
+        $this->assertSame('_default', $offline->current());
 
         // 8. available()/exists() — скан папок view/app.
         $this->assertSame(['_default', 'animals'], array_values($offline->available()));

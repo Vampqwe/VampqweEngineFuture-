@@ -152,7 +152,10 @@ final class Theme implements ThemeInterface
     /** animals.localhost -> animals (без www, localhost, 127.0.0.1). */
     private function guessFromSubdomain(string $host): string
     {
-        if ($host === '' || $host === 'localhost' || str_contains($host, '127.0.0.1')) {
+        // Эвристика имеет смысл только для ПОДДОМЕНА: хост с точкой внутри
+        // ('animals.localhost'). Голый хост без точки ('localhost', 'server') —
+        // это не поддомен, угадывать тут нечего -> дефолтная тема.
+        if ($host === '' || !str_contains($host, '.') || str_contains($host, '127.0.0.1')) {
             return '';
         }
         $first = explode('.', $host)[0];
