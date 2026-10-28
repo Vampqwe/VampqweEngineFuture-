@@ -26,6 +26,9 @@ final class TemplateEnvironment
     /** @var string|null имя layout, объявленного через @extends */
     private ?string $layout = null;
 
+    /** @var array<string,string> секции, переданные из дочернего шаблона в layout */
+    private array $inheritedSections = [];
+
     public function __construct(
         private readonly Compiler $compiler,
         private readonly Escaper $escaper,
@@ -48,12 +51,21 @@ final class TemplateEnvironment
         // Двухпроходный рендер: если шаблон объявил @extends('layout'),
         // рендерим layout, вставляя наши секции. Цикл с защитой от 10 уровней
         // наследования (layout может сам наследоваться от другого layout).
+        // Ключевой момент: дочерний шаблон мог ничего не вывести «в тело»
+        // (@yield пустой) — тогда выводом первого прохода и является content.
+        if ($this->layout !== null && $this->sections === [] && trim($output) !== '') {
+            $this->sections['content'] = $output;
+        }
+
         $depth = 0;
         while ($this->layout !== null && $depth++ < 10) {
             $layoutName = $this->layout;
-            $sections   = $this->sections;
+            // Секции наследуемого шаблона переносятся в layout: они не должны
+            // теряться при сбросе окружения (иначе @yield отдаст дефолт).
+            $inherited  = array_merge($this->inheritedSections, $this->sections);
             $this->reset();
-            $this->sections = $sections;
+            $this->inheritedSections = $inherited;
+            $this->sections          = $inherited;
 
             $layoutPhp = ($this->nameRenderer)($layoutName, []);
             $output    = $this->evaluate($layoutPhp, $data);
@@ -67,6 +79,7 @@ final class TemplateEnvironment
         $this->sections      = [];
         $this->sectionStack  = [];
         $this->layout        = null;
+        $this->inheritedSections = [];
     }
 
     private function evaluate(string $compiledPhp, array $data): string

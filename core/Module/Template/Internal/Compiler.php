@@ -53,7 +53,7 @@ final class Compiler
             '/@extends\(\s*(.+?)\s*\)/'                          => '<?php $this->extend($1); ?>',
             '/@section\(\s*(.+?)\s*\)/'                          => '<?php $this->startSection($1); ?>',
             '/@endsection/'                                      => '<?php $this->stopSection(); ?>',
-            '/@yield\(\s*(.+?)\s*\)/'                            => '<?php echo $this->yieldSection($1); ?>',
+            '/@yield\(([^)]*)\)/'                            => '<?php echo $this->yieldSection($1); ?>',
             '/@include\(\s*(.+?)\s*\)/'                          => '<?php echo $this->renderPartial($1); ?>',
             '/@if\(\s*(.+?)\s*\)/'                               => '<?php if ($1): ?>',
             '/@elseif\(\s*(.+?)\s*\)/'                           => '<?php elseif ($1): ?>',
