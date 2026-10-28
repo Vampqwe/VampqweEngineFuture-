@@ -29,6 +29,15 @@ use Tests\Framework\TestCase;
  *      '.installing', '.upgrading', '.maintenance', '.error' — проверка
  *      обходит реальные файлы и потому ловит регрессию до того, как её
  *      увидит человек (машинная инвариантность теоремы).
+ *  T4. Мост «ядро → модули» (ModuleBridge) структурно замкнут (R6b):
+ *      a) ни один файл core/System/** кроме Support/ModuleBridge.php не
+ *         содержит literal-ссылок `::class` на App\Core\Module\* или
+ *         App\modules\* в executable-коде;
+ *      b) сам Bridge деградирует честно: пустой контейнер => все
+ *         capability-геттеры отдают null, errorPage() отдаёт fallback,
+ *         log()/configValue()/path() не бросают fatal (п.9).
+ *      Регрессия «кто-то вернул FQN модуля в Kernel» падает здесь ещё
+ *      до того, как её поймает линтер на чужой машине без composer dump.
  */
 final class KernelBoundaryTest extends TestCase
 {
@@ -124,5 +133,85 @@ final class KernelBoundaryTest extends TestCase
                 );
             }
         }
+    }
+
+    /**
+     * T4a: R6b как исполняемая инвариантность — единственный файл core/System/**,
+     * которому разрешено знать `::class` контрактов модулей, это Support/ModuleBridge.php.
+     */
+    public function testOnlyModuleBridgeKnowsModuleClassNames(): void
+    {
+        $root  = dirname(__DIR__, 2);
+        $files = [];
+        $it    = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root . '/core/System'));
+        foreach ($it as $file) {
+            if ($file->isFile() && str_ends_with((string) $file->getFilename(), '.php')) {
+                $files[] = $file->getPathname();
+            }
+        }
+        sort($files);
+
+        $pattern = '#App\\\\Core\\\\Module\\\\[A-Za-z0-9_\\\\]+::class|App\\\\modules\\\\[A-Za-z0-9_\\\\]+::class#';
+
+        foreach ($files as $abs) {
+            $rel = str_replace($root . '/', '', $abs);
+            if (str_ends_with($rel, 'Support/ModuleBridge.php')) {
+                continue; // легальный единичный носитель знания о модулях
+            }
+            $src   = (string) file_get_contents($abs);
+            $clean = '';
+            foreach (token_get_all($src) as $t) {
+                if (is_array($t) && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                    continue; // проверяем только executable-код
+                }
+                $clean .= is_array($t) ? $t[1] : $t;
+            }
+
+            $this->assertFalse(
+                (bool) preg_match($pattern, $clean),
+                "R6b: файл {$rel} содержит прямую ::class-ссылку на модуль — "
+                    . 'ядро обязано резолвить способности только через ModuleBridge (п.1/п.2).'
+            );
+        }
+    }
+
+    /**
+     * T4b: ModuleBridge честно деградирует на пустом контейнере (п.9):
+     * capability-геттеры => null, errorPage => fallback, log/configValue — без fatal.
+     */
+    public function testModuleBridgeDegradesGracefullyOnEmptyContainer(): void
+    {
+        $bridge = new \App\Core\System\Support\ModuleBridge(
+            new \App\Core\System\Container\Container()
+        );
+
+        $this->assertNull($bridge->session());
+        $this->assertNull($bridge->storeMigrator());
+        $this->assertNull($bridge->hooks());
+        $this->assertNull($bridge->assets());
+        $this->assertNull($bridge->themes());
+        $this->assertNull($bridge->templates());
+        $this->assertNull($bridge->database());
+        $this->assertNull($bridge->fileSystem());
+        $this->assertNull($bridge->config());
+        $this->assertNull($bridge->installer());
+        $this->assertNull($bridge->installerPages());
+        $this->assertNull($bridge->adminPanel());
+        $this->assertNull($bridge->authManager());
+        $this->assertNull($bridge->pageRenderer());
+        $this->assertNull($bridge->errorPages());
+        $this->assertFalse($bridge->hasErrorPages());
+
+        // Fallback-страница ошибки вместо fatal
+        $html = $bridge->errorPage(503);
+        $this->assertTrue(str_contains($html, '503'), 'Без Error-модуля ядро отдаёт минимальный HTML.');
+
+        // best-effort операции не бросают исключений
+        $bridge->log('error', 'must-not-throw');
+        $this->assertSame('fallback', $bridge->configValue('app.name', 'fallback'));
+
+        // Константы контрактов доступны и вне контейнера (статические, literal-знание живёт в Bridge)
+        $this->assertTrue($bridge->defaultTheme() !== '', 'DEFAULT_THEME обязан быть непустой строкой.');
+        $this->assertTrue($bridge->scopeApp() !== '', 'SCOPE_APP обязан быть непустой строкой.');
     }
 }

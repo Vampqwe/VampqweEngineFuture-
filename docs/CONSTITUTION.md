@@ -20,7 +20,7 @@
 
 | Пункт | Формулировка (кратко) | Статика (lint-rules) | Тесты |
 |-------|------------------------|----------------------|-------|
-| п.1 | Ядро не знает бизнес-логику и конкретные классы модулей | R6 (ссылки core/System на классы модулей вне белого списка контрактов), R8 (аннотированные исключения) | `KernelBoundaryTest::testKernelSurvivesWithoutApplicationModules` (T1) |
+| п.1 | Ядро не знает бизнес-логику и конкретные классы модулей | R6 (ссылки core/System на классы модулей вне белого списка контрактов), R6b (единственный носитель знания о `::class` модулей — `Support/ModuleBridge.php`), R8 (аннотированные исключения) | `KernelBoundaryTest::testKernelSurvivesWithoutApplicationModules` (T1), `testOnlyModuleBridgeKnowsModuleClassNames` (T4a) |
 | п.2 | Граница модуля — только `Contracts/`, `Internal/` закрыт | R3 (трансграничные use Internal\), R9 (new/instanceof через границы), R10 (крипто ровно в одном месте), R11b (scalar-константы контрактов доступны без нарушения п.2) | `SecurityTest` (roundtrip единого Crypto), юнит-тесты модулей через контракты |
 | п.3 | DI, никаких глобалов и service locator | R2 (dirname-пути), R7 (BASE_PATH только в bootstrap путей), R11c (нет static-состояния в контрактах) | `ContainerTest` (autowiring, циклы, instance) |
 | п.4 | Две дороги HTTP + расширение только хуками | — (структура конвейера) | `RouterTest`, `HookTest`, `AssetsTest` (dispatch-точки) |
@@ -29,7 +29,7 @@
 | п.7 | Пути только из `Paths::MAP`; имена флагов только из `AppState` | R2, R7 (конкатенации вне MAP; словарь маркеров = `AppState::flagNames()`, дублирование имён флагов в линтере запрещено) | `PathsTest`, `KernelBoundaryTest::testAppStateDetectIsSingleResolver` (T2), `testNoFlagLiteralsInKernelCode` (T3) |
 | п.8 | strict_types везде | R1 (все файлы TARGETS) | инвариант README |
 | п.9 | Честная самодиагностика | — | `php bin/engine doctor` (реальные проверки), `/system/health` |
-| п.10 | Движок не падает; единый источник логики (DRY) | R10 (единая криптография), T3-инвариант (имена флагов в одном словаре) | `KernelBoundaryTest` T1–T3, деградационные юнит-тесты |
+| п.10 | Движок не падает; единый источник логики (DRY) | R10 (единая криптография), T3-инвариант (имена флагов в одном словаре) | `KernelBoundaryTest` T1–T4, деградационные юнит-тесты (в т.ч. T4b: пустой контейнер ⇒ Bridge отдаёт null/fallback без fatal) |
 
 Правила линтера без прямой привязки к пункту (чистый стиль): R11a — контракты
 без default-значений параметров (реализация обязана объявлять значения сама).
@@ -54,7 +54,7 @@
 
 * Нет автоматического детектора «перегруженного метода» (эвристики SRP
   субъективны) — объём `Kernel.handle()` контролируется ревью, поведение
-  закреплено тестами T1–T3.
+  закреплено тестами T1–T4.
 
 ~~Doctor-проверка `.env`-секретов на утечку в репозиторий~~ — **закрыто**:
 детектор живёт в `core/Module/Doctor/Checks/SecretLeakCheck.php` и встроен в
