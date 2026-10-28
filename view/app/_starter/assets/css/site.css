@@ -1,0 +1,6 @@
+/* Стартовая статика новой темы. При создании сайта (site:add) папка стартера
+   клонируется целиком — правьте этот файл, не трогая layouts/site.phtml.
+   Раздаётся по /assets/css/site.css?v=<hash>: после изменения файла версия
+   в URL меняется автоматически, кэш браузера сбрасывается. */
+body { font-family: system-ui, sans-serif; margin: 0; color: #1f2430; background: #fff; }
+main { max-width: 760px; margin: 0 auto; padding: 3rem 1.5rem; }

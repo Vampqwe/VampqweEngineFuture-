@@ -114,7 +114,8 @@ final class AssetsRegistry implements AssetsInterface
         foreach ($this->candidates($rel) as $abs) {
             if ($this->fs->exists($abs)) {
                 $body = $this->fs->read($abs);
-                return ['body' => $body, 'mime' => self::MIME_MAP[$ext]];
+
+                return ['body' => $body, 'mime' => self::MIME_MAP[$ext], 'path' => $abs];
             }
         }
 
@@ -126,7 +127,34 @@ final class AssetsRegistry implements AssetsInterface
         if (preg_match('#^(https?:)?//#i', $src)) {
             return $src; // внешний URL (CDN) — как есть
         }
-        return '/assets/' . ltrim($src, '/');
+        $rel = ltrim($src, '/');
+
+        return '/assets/' . $rel . ($this->versionOf($rel) !== '' ? '?v=' . $this->versionOf($rel) : '');
+    }
+
+    /**
+     * Версия для кэш-бустинга: 8 hex-симворов md5 от mtime+size первого
+     * существующего файла каскада. Счёт идёт по всем зарегистрированным
+     * src'там за один запрос (статичный кэш на экземпляр реестра).
+     */
+    private array $versionCache = [];
+
+    private function versionOf(string $rel): string
+    {
+        if (isset($this->versionCache[$rel])) {
+            return $this->versionCache[$rel];
+        }
+
+        $version = '';
+        foreach ($this->candidates($rel) as $abs) {
+            clearstatcache(true, $abs);
+            if (is_file($abs)) {
+                $version = substr(md5((string) (filemtime($abs) ?: 0) . ':' . (filesize($abs) ?: 0)), 0, 8);
+                break;
+            }
+        }
+
+        return $this->versionCache[$rel] = $version;
     }
 
     public function useContext(?string $domain, string $theme): void

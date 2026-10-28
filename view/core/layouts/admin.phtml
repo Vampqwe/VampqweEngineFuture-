@@ -7,10 +7,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ $title ?? 'Панель' }} — {{ $appName }}</title>
-{{-- Статика панели через модуль Assets (SCOPE_CORE): файл view/core/assets/css/admin.css
-     можно менять без правки layout; тема/сайт перекрывают его через каскад
-     site -> theme -> core. --}}
+{{-- Статика панели через реестр Assets (SCOPE_CORE, каскад site->theme->core):
+     AdminController регистрирует css/admin.css и js/admin.js, теги отдаются
+     переменными $assetsStyles/$assetsScripts. Файл view/core/assets/css/admin.css
+     меняется без правки layout; сторонние модули дописывают своё через хуки
+     engine.assets.styles / engine.assets.scripts. Fallback — прямые ссылки,
+     если модуль Assets по какой-то причине недоступен (п.9: не падать). --}}
+@if(($assetsStyles ?? '') !== '')
+{!! $assetsStyles !!}
+@else
 <link rel="stylesheet" href="/assets/css/admin.css">
+@endif
 </head>
 <body>
 <div class="wrap">
@@ -28,6 +35,11 @@
     @yield('content')
   </main>
 </div>
+{{-- Скрипты панели: реестр Assets (см. комментарий в <head>). --}}
+@if(($assetsScripts ?? '') !== '')
+{!! $assetsScripts !!}
+@else
 <script src="/assets/js/admin.js" defer></script>
+@endif
 </body>
 </html>

@@ -279,9 +279,36 @@ class Kernel
             return $this->errorPage(404);
         }
 
+        // Кэш-валидация: ETag по содержимому + Last-Modified по mtime файла.
+        // Условный запрос (If-None-Match / If-Modified-Since) -> 304 без тела:
+        // max-age 86400 + ревалидация = мгновенная раздача после изменения файла
+        // (?v= в URL тоже ломает кэш, см. AssetsRegistry::url).
+        $etag = '"' . md5($file['body']) . '"';
+        $mtime = is_file($file['path']) ? (int) filemtime($file['path']) : time();
+        $headers = [
+            'Content-Type'  => $file['mime'],
+            'Cache-Control' => 'public, max-age=86400',
+            'ETag'          => $etag,
+            'Last-Modified' => gmdate('D, d M Y H:i:s', $mtime) . ' GMT',
+        ];
+
+        $inm = (string) ($request->header('if-none-match') ?? '');
+        $ims = (string) ($request->header('if-modified-since') ?? '');
+        if ($inm !== '' && ($inm === '*' || str_contains($inm, $etag))) {
+            return new Response('', 304, array_intersect_key($headers, array_flip(['ETag', 'Last-Modified'])));
+        }
+        if ($inm === '' && $ims !== '') {
+            $since = strtotime($ims);
+            if ($since !== false && $mtime <= $since) {
+                return new Response('', 304, array_intersect_key($headers, array_flip(['ETag', 'Last-Modified'])));
+            }
+        }
+
         return (new Response($file['body'], 200))
-            ->withHeader('Content-Type', $file['mime'])
-            ->withHeader('Cache-Control', 'public, max-age=86400');
+            ->withHeader('Content-Type', $headers['Content-Type'])
+            ->withHeader('Cache-Control', $headers['Cache-Control'])
+            ->withHeader('ETag', $headers['ETag'])
+            ->withHeader('Last-Modified', $headers['Last-Modified']);
     }
 
     private function isInstallerPath(string $path): bool
@@ -433,6 +460,23 @@ class Kernel
         if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
             /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
             $views = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+
+            // Статика темы — через реестр Assets (каскад site->theme->core):
+            // регистрируем 'site.css'/'site.js' и публикуем теги в шаблоны.
+            // Файлы темы меняются без правки layout; хук engine.assets.*
+            // даёт модулям дописать своё (п.4). Если файлов нет — в касскаде
+            // совпадения не будет, URL всё равно корректен (404 без ?v=),
+            // а layout темы использует инлайн-fallback.
+            if ($this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+                /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
+                $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
+                $assets->useContext($site['domain'] ?? null, $theme !== '' ? $theme : \App\Core\Module\Theme\Theme::DEFAULT_THEME);
+                $assets->registerStyle('site', 'css/site.css');
+                $assets->registerScript('site', 'js/site.js');
+                $views->share('assetsStyles', $assets->styles());
+                $views->share('assetsScripts', $assets->scripts());
+            }
+
             try {
                 if ($theme !== '') {
                     $views->setTheme($theme);

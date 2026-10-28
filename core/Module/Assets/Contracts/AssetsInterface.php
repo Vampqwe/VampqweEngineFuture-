@@ -55,7 +55,7 @@ interface AssetsInterface
      * null — файла нет в каскаде (Kernel отдаст 404). MIME — из белого списка
      * расширений; traversal-защита: '..' и абсолютные пути отклоняются.
      *
-     * @return array{body:string,mime:string}|null
+     * @return array{body:string,mime:string,path:string}|null
      */
     public function serve(string $relativePath): ?array;
 

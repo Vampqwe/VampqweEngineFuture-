@@ -94,13 +94,58 @@ final class AssetsTest extends TestCase
     public function testUrlResolution(): void
     {
         $r = $this->registry();
-        $this->assertSame('/assets/css/admin.css', $r->url('css/admin.css'));
-        $this->assertSame('/assets/css/admin.css', $r->url('/css/admin.css'));
+        // Существующий файл каскада -> URL с кэш-бустингом ?v=<8 hex>.
+        $url = $r->url('css/admin.css');
+        $this->assertTrue(str_starts_with($url, '/assets/css/admin.css?v='), 'версионированный URL: ' . $url);
+        $this->assertSame(1, preg_match('/^\?v=[0-9a-f]{8}$/', substr($url, strlen('/assets/css/admin.css'))));
+        // Несуществующий файл -> без версии (не ломать внешние/отсутствующие src).
+        $this->assertSame('/assets/css/missing.css', $r->url('css/missing.css'));
+        // Тот же src с ведущим слэшем — тот же версионированный URL.
+        $this->assertSame($url, $r->url('/css/admin.css'));
         $this->assertSame('https://cdn.example/x.css', $r->url('https://cdn.example/x.css'));
         $this->assertSame('//cdn.example/x.js', $r->url('//cdn.example/x.js'));
 
         $r->registerScript('main', 'js/main.js');
         $this->assertTrue(str_contains($r->scripts(), '<script src="/assets/js/main.js" defer>'));
+    }
+
+    public function testVersionChangesWithFile(): void
+    {
+        $r = $this->registry();
+        $before = $r->url('css/admin.css');
+        sleep(1);
+        file_put_contents($this->dir . '/core/css/admin.css', 'CORE2-changed');
+        clearstatcache();
+        $after = $r->url('css/admin.css');
+        $this->assertFalse($before === $after, 'изменение файла меняет ?v= (сброс кэша браузера)');
+    }
+
+    public function testServeReturnsPathForValidation(): void
+    {
+        $r = $this->registry();
+        $file = $r->serve('css/admin.css');
+        $this->assertTrue($file !== null && str_ends_with($file['path'], 'core/css/admin.css'), 'path первого совпадения каскада');
+    }
+
+    public function testHookFiltersExtendAssetTags(): void
+    {
+        // П.4 Конституции: сторонний модуль дописывает свои теги через хуки,
+        // не правя движок и layout.
+        $hook = new \App\Core\Module\Hook\Hook();
+        $r = new AssetsRegistry(
+            new FileSystem(),
+            $this->dir . '/core',
+            $this->dir . '/appView',
+            $this->dir . '/sites',
+            $hook,
+        );
+        $r->registerStyle('admin', 'css/admin.css');
+        // В шине движка фильтры и действия — один механизм: addAction + applyFilters.
+        $hook->addAction('engine.assets.styles', static fn(string $html): string => $html . "\n<link rel=\"stylesheet\" href=\"/extra.css\">");
+        $hook->addAction('engine.assets.scripts', static fn(string $html): string => $html . "\n<script src=\"/extra.js\"></script>");
+
+        $this->assertTrue(str_contains($r->styles(), '/extra.css'), 'фильтр стилей применён');
+        $this->assertTrue(str_contains($r->scripts(), '/extra.js'), 'фильтр скриптов применён');
     }
 
     public function testFontAndImageMimes(): void
