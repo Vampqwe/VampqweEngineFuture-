@@ -130,4 +130,10 @@ return [
         'provider' => \App\modules\Pages\Providers\PagesServiceProvider::class,
         'critical' => false,
     ],
+    // Admin: панель администратора (/admin/*). Уровень 6+: после Auth/Pages/Doctor —
+    // использует их публичные контракты; все зависимости опциональны (п.2/п.3).
+    'Admin' => [
+        'provider' => \App\modules\Admin\Providers\AdminServiceProvider::class,
+        'critical' => false,
+    ],
 ];

@@ -1,0 +1,34 @@
+@extends('layouts/admin')
+@section('title') {{ $title }} @endsection
+@section('content')
+<h1>Страницы</h1>
+<p style="margin-bottom:14px"><a class="btn" href="/admin/pages/create">+ Новая страница</a></p>
+
+@if(($pages ?? []) === [])
+  <p style="color:#9aa3b5">Опубликованных страниц пока нет.</p>
+@else
+  <table>
+    <tr><th>#</th><th>Заголовок</th><th>Slug</th><th>Тип</th><th>Опубликована</th><th></th></tr>
+    @foreach($pages as $p)
+      <tr>
+        <td>{{ $p['id'] }}</td>
+        <td><a href="/admin/pages/edit/{{ $p['id'] }}">{{ $p['title'] }}</a></td>
+        <td><code>/{{ $p['slug'] }}</code></td>
+        <td>{{ $p['page_type'] ?? 'page' }}</td>
+        <td>{{ $p['published_at'] ?? '—' }}</td>
+        <td>
+          <form method="post" action="/admin/pages/delete/{{ $p['id'] }}" style="display:inline"
+                onsubmit="return confirm('Удалить страницу?');">
+            <input type="hidden" name="_csrf" value="{{ $csrf ?? '' }}">
+            <button class="btn danger" type="submit">Удалить</button>
+          </form>
+        </td>
+      </tr>
+    @endforeach
+  </table>
+
+  @if((int) ($page ?? 1) > 1)
+    <p style="margin-top:14px"><a href="/admin/pages?page={{ (int) $page - 1 }}">← предыдущая</a></p>
+  @endif
+@endif
+@endsection

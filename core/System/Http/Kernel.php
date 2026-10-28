@@ -86,6 +86,20 @@ class Kernel
             $userRouter->post('/logout', fn(Request $r): Response => $auth->logout($r));
         }
 
+        // Панель администратора (модуль Admin, app/modules): ВСЯ дорога
+        // /admin/* делегируется одному контракту AdminPanelInterface — ядро
+        // не знает маршрутов/разделов/шаблонов панели (п.2). Регистрация ДО
+        // /{slug}: '/admin' и любой хвост /admin/pages/edit/5 перехватываются
+        // панелью раньше контентных страниц; Guard внутри facade проверяется
+        // до маршрутизации по разделам.
+        if ($this->container->has(\App\modules\Admin\Contracts\AdminPanelInterface::class)) {
+            /** @var \App\modules\Admin\Contracts\AdminPanelInterface $admin */
+            $admin = $this->container->get(\App\modules\Admin\Contracts\AdminPanelInterface::class);
+            $adminRoute = fn(Request $r): Response => $admin->dispatch($r);
+            $userRouter->any('/admin', $adminRoute);
+            $userRouter->any('/admin/{tail*}', $adminRoute);
+        }
+
         // Страницы контента (модуль Pages, app/modules): /{slug} отдаёт
         // опубликованную страницу через тему сайта. Подключается ТОЛЬКО если
         // модуль зарегистрирован — ядро не жёстко зависит от приложения (п.2).

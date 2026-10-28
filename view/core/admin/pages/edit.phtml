@@ -1,0 +1,34 @@
+@extends('layouts/admin')
+@section('title') {{ $title }} @endsection
+@section('content')
+<h1>{{ !empty($page) ? 'Правка страницы · ' . $page['title'] : 'Новая страница' }}</h1>
+
+@if(!empty($error))
+  <div class="errbox">{{ $error }}</div>
+@endif
+
+<form method="post"
+      action="{{ !empty($page) ? '/admin/pages/save/' . $page['id'] : '/admin/pages/create' }}">
+  <input type="hidden" name="_csrf" value="{{ $csrf ?? '' }}">
+
+  <label>Заголовок
+    <input name="title" required value="{{ $page['title'] ?? '' }}">
+  </label>
+
+  <label>Статус
+    <select name="status">
+      <option value="draft"     {{ ($page['status'] ?? 'draft') === 'draft'     ? 'selected' : '' }}>Черновик</option>
+      <option value="published" {{ ($page['status'] ?? '') === 'published' ? 'selected' : '' }}>Опубликована</option>
+    </select>
+  </label>
+
+  <label>Содержимое
+    <textarea name="content">{{ $page['content'] ?? '' }}</textarea>
+  </label>
+
+  <p style="margin-top:20px">
+    <button class="btn" type="submit">Сохранить</button>
+    <a class="btn" href="/admin/pages" style="background:#333a52">Отмена</a>
+  </p>
+</form>
+@endsection
