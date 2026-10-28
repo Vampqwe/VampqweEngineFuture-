@@ -12,7 +12,13 @@ use InvalidArgumentException;
  *   @extends('layout')  @section('name') ... @endsection  @yield('name', 'default')
  *   @include('partials/header', ['a' => 1])
  *   @if / @elseif / @else / @endif   @foreach / @endforeach   @for / @endfor
+ *   @while / @endwhile   @php ... @endphp
  *   Вывод: {{ $x }} (экранируется), {!! $x !!} (raw).
+ *
+ * Синтаксис компиляции — ОДНОПРОХОДНЫЙ (см. compile()): исходный текст
+ * сканируется единым матчером токенов, а не цепочкой preg_replace по
+ * директивам. Это исключает класс багов «аргументы соседних секций
+ * слились ленивым квантификатором» и потерю контента @yield.
  *
  * Имена шаблонов нормализуются: только [A-Za-z0-9_/-], обязательно относительное,
  * без ".." — защита от path traversal.
@@ -20,137 +26,136 @@ use InvalidArgumentException;
 final class Compiler
 {
     /** Версия синтаксиса компилятора — входит в ключ кэша (см. CacheStore). */
-    public const SYNTAX_VERSION = '2';
+    public const SYNTAX_VERSION = '3';
+
+    /** Директивы без аргументов: раскрываются в PHP-код целиком. */
+    private const NO_ARG = [
+        'endsection' => '$this->stopSection();',
+        'stop'       => '$this->stopSection();',
+        'show'       => '$this->stopSection(); echo $this->yieldSection($this->lastSectionName());',
+        'else'       => 'else:',
+        'endif'      => 'endif;',
+        'endforeach' => 'endforeach;',
+        'endfor'     => 'endfor;',
+        'endwhile'   => 'endwhile;',
+    ];
+
+    /** Директивы «аргумент в скобках → PHP-фрагмент с {ARGS}». */
+    private const WITH_ARG = [
+        'extends'  => '$this->extend({ARGS});',
+        'section'  => '$this->startSection({ARGS});',
+        'yield'    => 'echo $this->yieldSection({ARGS});',
+        'include'  => 'echo $this->renderPartial({ARGS});',
+        'if'       => 'if ({ARGS}):',
+        'elseif'   => 'elseif ({ARGS}):',
+        'foreach'  => 'foreach ({ARGS}):',
+        'for'      => 'for ({ARGS}):',
+        'while'    => 'while ({ARGS}):',
+    ];
 
     /** Теги PHP собраны из частей: файл компилятора не должен содержать их литералов. */
     private const TAG_OPEN = '<?php ';
     private const TAG_CLOSE = ' ?>';
 
-    /** Маркеры произвольного PHP между @php и @endphp (склеены: файл не должен содержать их литералов). */
+    /** Маркер произвольного PHP между @php и @endphp. */
     private const RAW_PHP    = '<?p' . 'hp ' . "\x01VAMPRAWPHP\x01";
     private const RAW_ENDPHP = "\x01VAMPRAWEND\x01" . ' ?' . '>';
 
-    /** Кэш компиляции строки (для renderString). */
+    /** @var array<string,string> кэш компиляции строки (для renderString) */
     private array $stringCache = [];
 
+    /**
+     * Однопроходная компиляция: единый матчер токенов шаблонизирует исходник
+     * слева направо. Каждый токен (вывод, директива, текст) обрабатывается
+     * ровно один раз на своей позиции — никаких повторных сканов по уже
+     * подставленному PHP (именно они теряли секции в прежней схеме).
+     */
     public function compile(string $source): string
     {
-        // 0. Плейсхолдерим управляющие последовательности (@directive), чтобы
-        // ни один из проходов (вывод/директивы) не сканировал чужие стадии:
-        // подстановки с тегами PHP больше не встретят '@section' внутри
-        // себя, а email-подобный текст 'a@if' не будет съеден как директива.
-        $directives = [];
-        $masked = preg_replace_callback(
-            '/@([a-zA-Z]+)\s*(?:\(((?:[^()]|\([^()]*\))*)\))?/',
-            static function (array $m) use (&$directives): string {
-                $key = '___DIR' . count($directives) . '___';
-                $directives[$key] = $m[0];
-                return $key;
-            },
-            $source
-        ) ?? $source;
+        // Единый матчер токенов. Порядок альтернатив важен: {!! ... !!} ДО
+        // {{ ... }} (иначе '{!!' матчится как '{{' с мусором внутри).
+        // Директива матчится только когда сразу за именем НЕ идёт '.' или
+        // слово-символ: '@if.com' (email), '@media print'... — нет, '@media'
+        // это CSS at-rule: она неизвестная и остаётся текстом; но 'mail@a@if.com'
+        // не должен резаться как '@if'. Скобки — необязательная часть токена,
+        // требование аргумента проверяет compileToken по имени директивы.
+        $tokenRe = '/('
+            . '\{!!\s*.+?\s*!!\}'          // raw-вывод
+            . '|\{\{[^\r\n]*?\}\}'         // экранированный вывод (в одну строке-паре)
+            . '|@php\b(?!\w)(?<!\.)'         // блок произвольного PHP
+            . '|@endphp\b(?!\w)(?<!\.)'       // конец блока PHP
+            . '|@[a-zA-Z]+(?:\s*\(((?:[^()]|\([^()]*\))*)\))?(?![.\w])' // директива + опц. аргумент
+            . ')/su';
 
-        // 1. Сохраняем raw-вывод {!! ... !!} заглушками, чтобы он не мешал {{ }}.
-        $raws = [];
-        $masked = preg_replace_callback(
-            '/\{!!\s*(.+?)\s*!!\}/su',
-            static function (array $m) use (&$raws): string {
-                $key = '___RAW' . count($raws) . '___';
-                $raws[$key] = $m[1];
-                return $key;
-            },
-            $masked
-        ) ?? $masked;
+        return $this->finalizeRawPhp(
+            preg_replace_callback(
+                $tokenRe,
+                fn(array $m): string => $this->compileToken($m[0]),
+                $source
+            ) ?? $source
+        );
+    }
 
-        // 2. Экранированный вывод {{ ... }}.
-        $masked = preg_replace_callback(
-            '/\{\{\s*(.+?)\s*\}\}/su',
-            static fn(array $m): string => self::TAG_OPEN . "echo \$this->e(" . $m[1] . ');' . self::TAG_CLOSE,
-            $masked
-        ) ?? $masked;
+    /**
+     * Балансировка @php ... @endphp: между маркерами произвольный PHP идёт
+     * как есть (в HTML-режиме включается через открывающий тег маркера), а
+     * после @endphp возвращаемся в HTML закрывающим тегом. Маркеры собраны
+     * из частей, чтобы этот файл не содержал литералов тегов PHP.
+     */
+    private function finalizeRawPhp(string $compiled): string
+    {
+        // 1. Закрывающий маркер -> закрывающий тег PHP.
+        $out = str_replace(self::RAW_ENDPHP, self::TAG_CLOSE, $compiled);
+        // 2. Открывающий маркер (открывающий тег + якорь) -> просто
+        //    открывающий тег: удаляем якорь, тег уже стоит в константе.
+        $out = str_replace("\x01VAMPRAWPHP\x01", '', $out);
+        return $out;
+    }
 
-        // 3. Возврат raw-вывода.
-        foreach ($raws as $key => $expr) {
-            $masked = str_replace($key, self::TAG_OPEN . 'echo (' . $expr . ');' . self::TAG_CLOSE, $masked);
+    /** Раскрытие одного токена шаблона в PHP/текст. */
+    private function compileToken(string $token): string
+    {
+        // 1. {!! raw !!}
+        if (preg_match('/^\{!!\s*(.+?)\s*!!\}$/su', $token, $m) === 1) {
+            return self::TAG_OPEN . 'echo (' . $m[1] . ');' . self::TAG_CLOSE;
         }
 
-        // 4. Управляющие директивы (разворачиваем плейсхолдеры).
-        //
-        // Каждая директива компилируется ровно один раз из исходного текста:
-        // стадия 0 уже спрятала все вхождения '@directive(...)' в невидимые для
-        // остальных проходов плейсхолдеры, поэтому подстановки с тегами PHP
-        // больше не сканируются последующими правилами (прежняя схема «preg_replace
-        // по очереди на каждую директиву» систематически ломала секции: аргументы
-        // соседних @section сливались ленивым квантификатором и контент страницы
-        // терялся — баг инсталлятора: пустые формы вместо wizard'а).
-        $directiveMap = [
-            'extends'    => '$this->extend({ARGS});',
-            'section'    => '$this->startSection({ARGS});',
-            'endsection' => '$this->stopSection();',
-            'show'       => '$this->stopSection(); echo $this->yieldSection($this->lastSectionName());',
-            'stop'       => '$this->stopSection();',
-            'yield'      => 'echo $this->yieldSection({ARGS});',
-            'include'    => 'echo $this->renderPartial({ARGS});',
-            'if'         => 'if ({ARGS}):',
-            'elseif'     => 'elseif ({ARGS}):',
-            'else'       => 'else:',
-            'endif'      => 'endif;',
-            'foreach'    => 'foreach ({ARGS}):',
-            'endforeach' => 'endforeach;',
-            'for'        => 'for ({ARGS}):',
-            'endfor'     => 'endfor;',
-            'while'      => 'while ({ARGS}):',
-            'endwhile'   => 'endwhile;',
-            'php'        => self::RAW_PHP . '{ARGS}',
-            'endphp'     => self::RAW_ENDPHP,
-        ];
-
-        $compiled = $masked;
-
-        // Блочные директивы @php ... @endphp: произвольный PHP без скобок.
-        // Обрабатываются до основной карты (у них нет {ARGS}). Сравнение — по
-        // имени: в $directives под ключом лежит матч ВМЕСТЕ с захваченными
-        // пробелами ('@php '), точное равенство '@php' не срабатывало.
-        foreach ($directives as $key => $original) {
-            if (!preg_match('/^@(php|endphp)$/i', trim($original), $bm)) {
-                continue;
-            }
-            $compiled = str_replace($key, strtolower($bm[1]) === 'php' ? self::RAW_PHP : self::RAW_ENDPHP, $compiled);
+        // 2. {{ escaped }}
+        if (preg_match('/^\{\{\s*(.+?)\s*\}\}$/su', $token, $m) === 1) {
+            return self::TAG_OPEN . 'echo $this->e(' . $m[1] . ');' . self::TAG_CLOSE;
         }
 
-        foreach ($directives as $key => $original) {
-            if (!preg_match('/^@([a-zA-Z]+)\s*(?:\(((?:[^()]|\([^()]*\))*)\))?$/', $original, $m)) {
-                continue;
-            }
+        // 3. @php / @endphp — маркеры блоков (содержимое между ними остаётся as-is)
+        if (strcasecmp($token, '@php') === 0) {
+            return self::RAW_PHP;
+        }
+        if (strcasecmp($token, '@endphp') === 0) {
+            return self::RAW_ENDPHP;
+        }
+
+        // 4. Директивы: единый разбор '@name' + необязательные '(args)'
+        if ($token[0] === '@' && preg_match('/^@([a-zA-Z]+)(?:\s*\(((?:[^()]|\([^()]*\))*)\))?$/s', $token, $m) === 1) {
             $name = strtolower($m[1]);
-            if (!isset($directiveMap[$name])) {
-                continue; // неизвестная директива остаётся как есть (email, @media...)
-            }
-            if ($name === 'php' || $name === 'endphp') {
-                continue; // уже заменены маркерами выше
-            }
-            $args  = isset($m[2]) && trim($m[2]) !== '' ? trim($m[2]) : '';
-            $shape = $directiveMap[$name];
+            $hasArgs = isset($m[2]) && $m[2] !== '';
+            $args = $hasArgs ? trim($m[2]) : '';
 
-            if (str_contains($shape, '{ARGS}')) {
-                if ($args === '') {
-                    throw new InvalidArgumentException("Директивe [" . $name . "] нужны аргументы в скобках.");
+            if (isset(self::WITH_ARG[$name])) {
+                if (!$hasArgs || $args === '') {
+                    throw new InvalidArgumentException("Директивe [{$name}] нужны аргументы в скобках.");
                 }
-                $php = self::TAG_OPEN . str_replace('{ARGS}', $args, $shape) . self::TAG_CLOSE;
-            } else {
-                // Директивы без аргументов (@endsection, @show, @else...) могут
-                // случайно встретить '(' — тогда это НЕ их аргумент: возвращаем
-                // скобки обратно в HTML-текст.
-                $php = self::TAG_OPEN . $shape . self::TAG_CLOSE . ($args === '' ? '' : '(' . $m[2] . ')');
+                return self::TAG_OPEN . str_replace('{ARGS}', $args, self::WITH_ARG[$name]) . self::TAG_CLOSE;
             }
-            $compiled = str_replace($key, $php, $compiled);
+
+            if (isset(self::NO_ARG[$name])) {
+                // Случайно прилипшие скобки (@endif(x)) — не аргумент директивы:
+                // раскрываем её, скобки возвращаем текстом.
+                return self::TAG_OPEN . self::NO_ARG[$name] . self::TAG_CLOSE . ($hasArgs ? '(' . $m[2] . ')' : '');
+            }
+
+            // Неизвестная (@media, @foo(bar), email-хвосты) — остаётся как есть.
         }
 
-        // @php ... @endphp: произвольный PHP между ними — без экранирования.
-        $compiled = str_replace(self::RAW_PHP, '', $compiled);
-        $compiled = str_replace(self::RAW_ENDPHP, '', $compiled);
-
-        return $compiled;
+        return $token;
     }
 
     /** Компиляция строкового шаблона с кэшем по содержимому. */

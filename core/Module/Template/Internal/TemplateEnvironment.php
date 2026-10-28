@@ -181,6 +181,12 @@ final class TemplateEnvironment
         ob_start();
     }
 
+    /** Имя последней закрытой секции (@show без аргумента). */
+    public function lastSectionName(): string
+    {
+        return (string) ($this->lastSectionNames[count($this->lastSectionNames) - 1] ?? '');
+    }
+
     public function stopSection(): void
     {
         $name     = array_pop($this->sectionStack);
@@ -189,6 +195,7 @@ final class TemplateEnvironment
             throw new RuntimeException('@endsection без @section.');
         }
         $this->sections[$name] = ($this->sections[$name] ?? '') . $content;
+        $this->lastSectionNames[] = $name;
     }
 
     public function yieldSection(string $name, string $default = ''): string
