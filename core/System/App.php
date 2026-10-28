@@ -7,11 +7,20 @@ use App\Core\System\Container\Container;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Http\Kernel;
 use App\Core\System\Http\Request;
+use App\Core\System\Contracts\ModuleProviderInterface;
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\System\Support\EnvLoader;
 use App\Core\System\Support\Paths;
 use RuntimeException;
 
+/**
+ * Точка входа приложения: собирает контейнер, провайдеры модулей и HTTP-ядро.
+ *
+ * @constitution-exception п.3/п.7 — физический bootstrap контейнера: App
+ * единственный в ядре строит Paths(BASE_PATH) и регистрирует '*_path' в
+ * реестре (значение глобальной BASE_PATH define'ится в public/index.php и
+ * bin/engine). Все остальные потребители получают пути ТОЛЬКО из контейнера.
+ */
 class App
 {
     private ContainerInterface $container;
@@ -56,8 +65,9 @@ class App
         }
         unset($absolute);
 
-        // Загружаем .env ДО чтения конфигов (config/app.php читает $_ENV)
-        EnvLoader::load($paths->get('base') . '/.env');
+        // Загружаем .env ДО чтения конфигов (config/app.php читает $_ENV).
+        // Путь — из Paths::MAP (п.7), а не конкатенацией base + '/.env'.
+        EnvLoader::load($paths->get('env'));
 
         // putenv() из загрузчика не обновляет суперглобальный $_ENV — синхронизируем,
         // иначе конфиги, прочитанные позже, увидят только переменные реального окружения.
@@ -105,7 +115,12 @@ class App
                 continue;
             }
 
-            $provider = new $providerClass();
+            // build(): провайдер строится по конструктору и НЕ попадает в
+            // реестр контейнера — после boot в нём остаются только контракты
+            // модулей (п.2). Класс провайдера — доверенная запись манифеста,
+            // а не capability-резолв ядра.
+            $provider = $this->container->build($providerClass);
+            assert($provider instanceof ModuleProviderInterface);
             $provider->register($this->container);
             $provider->boot();
         }

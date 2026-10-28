@@ -137,6 +137,24 @@ final class ArchitectureLinter
     private const EXCEPTION_WHITELIST = [
         'core/System/Support/FatalPage.php',
         'core/System/Support/SuperAdmin.php',
+        // Физический bootstrap путей: App и Paths — единственные места ядра,
+        // где BASE_PATH читается (define — в public/index.php и bin/engine,
+        // они вне TARGETS линтера). Всё остальное получает пути только из
+        // контейнера ('*_path'), поэтому любое иное появление BASE_PATH = R7.
+        'core/System/App.php',
+        'core/System/Support/Paths.php',
+    ];
+
+    /**
+     * Белый список R9: тестовые файлы, легально тестирующие внутренности
+     * модулей напрямую (юнит-тесты парсеров/крипто/стор). Тест обязан
+     * нести аннотацию '@constitution-exception п.2' с обоснованием —
+     * R8 требует её наличия, отсутствие записи = устаревший whitelist.
+     *
+     * @var list<string>
+     */
+    private const TEST_INTERNAL_WHITELIST = [
+        'tests/Unit/SecurityTest.php',
     ];
 
     public function __construct(private readonly string $basePath)
@@ -202,7 +220,8 @@ final class ArchitectureLinter
             }
 
             // ---- R8: исключения п.2 требуют аннотации @constitution-exception ----
-            if (in_array($rel, self::EXCEPTION_WHITELIST, true)
+            if ((in_array($rel, self::EXCEPTION_WHITELIST, true)
+                    || in_array($rel, self::TEST_INTERNAL_WHITELIST, true))
                 && !str_contains($src, '@constitution-exception')) {
                 $violations[] = "R8 файл-исключение без аннотации @constitution-exception — {$rel}";
             }
@@ -210,6 +229,7 @@ final class ArchitectureLinter
             // ---- R9: статическая связность с Internal/чужими классами (new/instanceof) ----
             $code = $this->executableCode($src);
             $home = $this->ownModuleOf($rel);
+            $r9exempt = in_array($rel, self::TEST_INTERNAL_WHITELIST, true);
             if (preg_match_all(
                 '/\b(?:new|instanceof)\s+\\\\?((?:App\\\\(?:Core\\\\)?Module|App\\\\modules)\\\\[A-Za-z0-9_\\\\]+)/',
                 $code,
@@ -223,6 +243,9 @@ final class ArchitectureLinter
                     );
                     if ($crossInternal && $home !== null && $mm[1] === $home) {
                         continue; // свой Internal — легально
+                    }
+                    if ($r9exempt) {
+                        continue; // юнит-тест из TEST_INTERNAL_WHITELIST (аннотация проверена в R8)
                     }
                     if ($crossInternal || str_contains($fqcn, '\\\\Internal\\\\')) {
                         $violations[] = "R9 прямая связность с внутренностями модуля [{$fqcn}] — {$rel}";
@@ -387,7 +410,11 @@ final class ArchitectureLinter
         $code = $this->executableCode($src);
         $out  = [];
 
-        if (preg_match('/\bBASE_PATH\b/', $code)) {
+        // BASE_PATH читается только в физическом bootstrap путей (белый
+        // список R8: App, Paths + аннотированные исключения FatalPage).
+        // Вне этих файлов любое появление глобальной константы = п.3/п.7.
+        if (!in_array($rel, self::EXCEPTION_WHITELIST, true)
+            && preg_match('/\bBASE_PATH\b/', $code)) {
             $out[] = "R7 обращение к глобальной константе BASE_PATH вместо '*_path' из контейнера — {$rel}";
         }
 
