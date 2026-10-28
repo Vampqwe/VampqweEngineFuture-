@@ -6,14 +6,17 @@ namespace App\Core\Module\Template\Internal;
 /**
  * Кэш скомпилированных шаблонов на диске (внутренняя кухня Template).
  *
- * Layout: <cachePath>/<md5(абсолютный путь к .phtml)>_<mtime>.php —
+ * Layout: <cachePath>/<md5(абсолютный путь к .phtml)>_<mtime>_v<SYNTAX>.php —
  * изменение исходника автоматически меняет ключ, инвалидация «бессрочная».
+ * Сегмент версии синтаксиса гарантирует, что после правки компилятора
+ * старые бинари никогда не будут прочитаны (см. Compiler::SYNTAX_VERSION).
  */
 final class CacheStore
 {
     public function __construct(
         private readonly string $cachePath,
         private readonly bool $enabled,
+        private readonly string $syntaxVersion = Compiler::SYNTAX_VERSION,
     ) {
     }
 
@@ -80,6 +83,7 @@ final class CacheStore
 
     private function compiledPath(string $sourceFile): string
     {
-        return $this->cachePath . '/' . md5($sourceFile) . '_' . (int) @filemtime($sourceFile) . '.php';
+        return $this->cachePath . '/' . md5($sourceFile) . '_' . (int) @filemtime($sourceFile)
+            . '_v' . $this->syntaxVersion . '.php';
     }
 }
