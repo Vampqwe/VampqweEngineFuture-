@@ -62,9 +62,14 @@ namespace App\Core\System\Support;
  *  R10. Прямые криптопримитивы (openssl_encrypt/decrypt) разрешены ровно
  *       в одном месте — Security/Internal/Crypto.php (единый источник
  *       шифрования; DRY + п.2).
- *  R11. Методы публичных контрактов (*/Contracts/*.php) не имеют
- *       default-значений параметров: реализация не может молча
- *       рассинхронизировать контракт и интерфейс (усиление п.2/п.3).
+ *  R11. Публичные контракты (*\/Contracts\/*.php) — чистые абстракции:
+ *       a) методы не имеют default-значений параметров (реализация обязана
+ *          объявлять значения сама и не может молча рассинхронизировать
+ *          контракт); вызывающий обязан передавать аргументы явно;
+ *       b) константы контракта обязаны иметь scalar-значение
+ *          (`public const X = '...';`) — тогда они наследуются всеми
+ *          реализациями и доступны как `XxxInterface::X` без нарушения п.2;
+ *       c) запрещены static-свойства: состояние живёт в реализациях.
  *
  * Выход: построчный отчёт; exit code 1 при любом нарушении — готов к CI.
  */
@@ -82,7 +87,7 @@ final class ArchitectureLinter
      * @var list<string>
      */
     private const CORE_ALLOWED_REFERENCES = [
-        // Контракты системных модулей (core/Module/*/Contracts)
+        // Контракты системных модулей (core\/Module\/*\/Contracts)
         'App\\Core\\Module\\Config\\Contracts\\ConfigRepositoryInterface',
         'App\\Core\\Module\\Error\\Contracts\\ErrorPageInterface',
         'App\\Core\\Module\\Hook\\Contracts\\HookInterface',
@@ -102,7 +107,7 @@ final class ArchitectureLinter
         'App\\Core\\Module\\Migration\\Contracts\\MigratorInterface',
         'App\\Core\\Module\\Security\\Contracts\\SecurityInterface',
         'App\\Core\\Module\\Exception\\Contracts\\ExceptionHandlerInterface',
-        // Контракты пользовательских модулей (app/modules/*/Contracts) —
+        // Контракты пользовательских модулей (app\/modules\/*\/Contracts) —
         // биндятся провайдерами приложения, ядро резолвит только по ним.
         'App\\modules\\Auth\\Contracts\\AuthManagerInterface',
         'App\\modules\\Pages\\Contracts\\PageRendererInterface',
@@ -231,11 +236,14 @@ final class ArchitectureLinter
                 $violations[] = "R10 openssl_* вне единого криптоузла Security\\Internal\\Crypto — {$rel}";
             }
 
-            // ---- R11: контракты без default-значений параметров ----
-            if (str_contains($rel, '/Contracts/') && preg_match('/^\s*public function /m', $src)) {
+            // ---- R11: контракты без default-значений и state ----
+            if (str_contains($rel, '/Contracts/')) {
                 foreach ($this->contractDefaultParamLines($src) as $lineNo => $line) {
                     $violations[] = "R11 default-значение параметра в контракте (строка {$lineNo}) — {$rel}: "
                         . trim($line);
+                }
+                foreach ($this->contractStateViolations($src) as $msg) {
+                    $violations[] = "{$msg} — {$rel}";
                 }
             }
         }
@@ -331,8 +339,8 @@ final class ArchitectureLinter
             str_repeat("\n", substr_count($m[0], "\n")), $src) ?? $src;
         $out = preg_replace('~^\s*//.*$|//[^\n"]*$~m', '', $out) ?? $out;
         // 2) строковые литералы (одинарные/двойные) -> пустые кавычки
-        $out = preg_replace("'(?:\\\\.|[^'\\\\])*'", "''", $out) ?? $out;
-        $out = preg_replace('"(?:\\\\.|[^"\\\\])*"', '""', $out) ?? $out;
+        $out = preg_replace("/'(?:\\\\.|[^'\\\\])*'/", "''", $out) ?? $out;
+        $out = preg_replace('/"(?:\\\\.|[^"\\\\])*"/', '""', $out) ?? $out;
 
         return $out;
     }
@@ -430,7 +438,8 @@ final class ArchitectureLinter
 
     /**
      * R11: строки public function в контрактах, содержащие default-значения
-     * параметров (= или ?= после имени параметра). Возвращает номер=>текст.
+     * параметров (= после имени параметра; '=>' в match-контексте не бывает
+     * в сигнатуре интерфейса). Возвращает номер=>текст.
      *
      * @return array<int,string>
      */
@@ -447,12 +456,44 @@ final class ArchitectureLinter
             for ($j = $i + 1; $j < count($lines) && substr_count($sig, '(') > substr_count($sig, ')'); $j++) {
                 $sig .= ' ' . $lines[$j];
             }
-            if (preg_match('/\$[\w, ]+=|\?\s*\w+\s*=/', $sig)) {
-                $bad[$i + 1] = $sig;
+            // default-значение: '=' внутри круглых скобок сигнатуры
+            if (preg_match('/\((?P<args>[^()]*(?:\([^()]*\)[^()]*)*)\)/', $sig, $mm)
+                && str_contains($mm['args'], '=')) {
+                $bad[$i + 1] = trim($sig);
             }
         }
 
         return $bad;
+    }
+
+    /**
+     * R11b: константы и static-свойства контрактов. Константа обязана иметь
+     * scalar-значение (иначе наследники не получат `XxxInterface::X`);
+     * static-свойства запрещены полностью.
+     *
+     * @return list<string> сообщения без имени файла
+     */
+    private function contractStateViolations(string $src): array
+    {
+        $out   = [];
+        $lines = preg_split('/\r\n|\r|\n/', $src) ?: [];
+        foreach ($lines as $i => $line) {
+            if (preg_match('/^\s*(?:public\s+)?const\s+\w+\s*;/', $line)) {
+                $out[] = sprintf(
+                    'R11 константа контракта без значения (строка %d): %s',
+                    $i + 1,
+                    trim($line)
+                );
+            } elseif (preg_match('/^\s*(?:public|protected|private)\s+(?:readonly\s+)?static\s+/', $line)) {
+                $out[] = sprintf(
+                    'R11 static-свойство в контракте (строка %d): %s',
+                    $i + 1,
+                    trim($line)
+                );
+            }
+        }
+
+        return $out;
     }
 }
 

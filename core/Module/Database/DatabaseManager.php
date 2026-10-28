@@ -181,9 +181,7 @@ final class DatabaseManager implements DatabaseInterface
         // один файл, а tableExists/sizes смотрели в другой — реестр миграций
         // ложно считался несозданным/несуществующим.
         if (!str_starts_with($path, '/')) {
-            $storagePath = $this->container->has('storage_path')
-                ? (string) $this->container->get('storage_path')
-                : BASE_PATH . '/storage';
+            $storagePath = (string) $this->container->get('storage_path');
             $path = rtrim($storagePath, '/') . '/' . $path;
         }
 
