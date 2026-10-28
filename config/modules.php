@@ -105,6 +105,12 @@ return [
         'provider' => \App\Core\Module\Theme\Providers\ThemeServiceProvider::class,
         'critical' => false,
     ],
+    // Assets: реестр CSS/JS и PHP-раздача статики (Этап 2). Уровень 4+: после
+    // FileSystem/Config; Kernel подключает контекст (домен+тема) на каждом запросе.
+    'Assets' => [
+        'provider' => \App\Core\Module\Assets\Providers\AssetsServiceProvider::class,
+        'critical' => false,
+    ],
     'Queue' => [
         'provider' => \App\Core\Module\Queue\Providers\QueueServiceProvider::class,
         'critical' => false,

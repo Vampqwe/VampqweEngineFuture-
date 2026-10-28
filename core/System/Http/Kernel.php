@@ -41,6 +41,16 @@ class Kernel
             return $this->installerResponse($request);
         }
 
+        // Статика (модуль Assets): /assets/<path> раздаётся PHP из каскада
+        // site-sandbox -> theme -> core ДО проверки состояния — инсталлятору
+        // и страницам ошибок свои CSS нужны и в NotInstalled/Maintenance.
+        // До установки Theme/Database нет — контекст выставит сам assetResponse
+        // best-effort (без него работает только CORE-каскад).
+        if (str_starts_with($request->path, '/assets/')
+            && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+            return $this->finish($this->assetResponse($request), $session);
+        }
+
         // Для состояний вне Running отдаём служебные страницы,
         // игнорируя маршрутизацию (кроме /system/health — он доступен всегда).
         if ($state !== AppState::Running && !$this->isHealthCheck($request)) {
@@ -229,6 +239,40 @@ class Kernel
             || str_starts_with($path, '/admin')
             || str_starts_with($path, '/api/system')
             || $this->isInstallerPath($path);
+    }
+
+    /**
+     * Раздача статики (модуль Assets): /assets/<path> -> каскад
+     * site-sandbox -> theme -> core. Контекст домена/темы выставляется здесь же
+     * (best effort: без Theme-модуля/БД — только CORE-каскад). Отсутствующий
+     * файл — 404 через модуль Error (п.9: не падать).
+     */
+    private function assetResponse(Request $request): Response
+    {
+        /** @var \App\Core\Module\Assets\Contracts\AssetsInterface $assets */
+        $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
+
+        // Контекст запроса для каскада: тема сайта + домен из реестра (мультисайт).
+        $theme  = '';
+        $domain = null;
+        if ($this->container->has(\App\Core\Module\Theme\Contracts\ThemeInterface::class)) {
+            /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+            $themes = $this->container->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+            $host   = strtolower((string) ($request->header('host') ?? ''));
+            $theme  = $themes->resolveForRequest($host);
+            $site   = $themes->site();
+            $domain = $site['domain'] ?? null;
+        }
+        $assets->useContext($domain, $theme !== '' ? $theme : \App\Core\Module\Theme\Theme::DEFAULT_THEME);
+
+        $file = $assets->serve(substr($request->path, strlen('/assets/')));
+        if ($file === null) {
+            return $this->errorPage(404);
+        }
+
+        return (new Response($file['body'], 200))
+            ->withHeader('Content-Type', $file['mime'])
+            ->withHeader('Cache-Control', 'public, max-age=86400');
     }
 
     private function isInstallerPath(string $path): bool
