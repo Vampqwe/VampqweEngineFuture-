@@ -26,6 +26,12 @@ final class Theme implements ThemeInterface
 
     private string $current;
 
+    /** Хост последнего запроса (для site()). */
+    private string $lastHost = '';
+
+    /** @var array{domain:string,theme:string,title:string}|null карточка последнего резолва. */
+    private ?array $lastSite = null;
+
     public function __construct(
         private readonly TemplateInterface $views,
         private readonly SiteRegistry $registry,
@@ -39,12 +45,19 @@ final class Theme implements ThemeInterface
     public function resolveForRequest(string $host): string
     {
         $host = strtolower($this->normalizeHost($host));
+        $this->lastHost = $host;
 
-        // 1. Реестр сайтов из БД (точный маппинг домен -> тема).
-        $theme = $this->registry->themeFor($host);
-        if ($theme !== '' && $this->exists($theme)) {
-            $this->use($theme);
-            return $theme;
+        // 1. Полная карточка сайта из БД-реестра (+ эвристика поддомена в резолвере).
+        $site = $this->registry->resolve($host);
+        if ($site !== null) {
+            $this->lastSite = $site;
+
+            if ($this->exists($site['theme'])) {
+                $this->use($site['theme']);
+                return $site['theme'];
+            }
+        } else {
+            $this->lastSite = null;
         }
 
         // 2. Эвристика поддомена: animals.local / animals.localhost -> 'animals'.
@@ -58,6 +71,24 @@ final class Theme implements ThemeInterface
         // 3. Тема по умолчанию из конфигурации.
         $this->use($this->defaultTheme);
         return '';
+    }
+
+    public function resolveSite(string $host): ?array
+    {
+        return $this->registry->resolve(strtolower($this->normalizeHost($host)));
+    }
+
+    public function site(?string $host = null): ?array
+    {
+        if ($host === null) {
+            return $this->lastSite;
+        }
+        return $this->resolveSite($host);
+    }
+
+    public function registerSite(string $domain, string $theme, string $title = ''): bool
+    {
+        return $this->registry->register($domain, $theme, $title);
     }
 
     public function use(string $theme): void

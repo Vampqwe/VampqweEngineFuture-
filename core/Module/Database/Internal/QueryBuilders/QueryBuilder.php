@@ -143,10 +143,8 @@ final class QueryBuilder
         $sql = 'UPDATE ' . $this->wrapIdentifier($this->table)
              . ' SET ' . implode(', ', $sets) . $whereSql;
 
-        // TODO: affected rows появится вместе с возвращаемым типом DatabaseInterface::run().
-        $this->db->run($sql, [...$bindings, ...$whereBindings]);
-
-        return 0;
+        // run() возвращает число затронутых строк (PDOStatement::rowCount).
+        return $this->db->run($sql, [...$bindings, ...$whereBindings]);
     }
 
     public function delete(): void

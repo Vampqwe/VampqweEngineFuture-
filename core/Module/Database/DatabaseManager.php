@@ -91,6 +91,16 @@ final class DatabaseManager implements DatabaseInterface
     }
 
     /**
+     * Идентификатор последней вставленной строки (PDO::lastInsertId).
+     * Реализация DatabaseInterface::lastInsertId() — нужна репозиториям
+     * модулей-потребителей (Pages) после INSERT.
+     */
+    public function lastInsertId(): int
+    {
+        return (int) $this->pdo()->lastInsertId();
+    }
+
+    /**
      * Прогон SQL-дампа (например database/db.sql) через активное PDO-соединение.
      * Реализация DatabaseInterface::migrate(). Идемпотентность обеспечивает вызывающий
      * (Installer проверяет наличие таблиц перед прогоном).

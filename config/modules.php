@@ -117,4 +117,17 @@ return [
         'provider' => \App\Core\Module\Installer\Providers\InstallerServiceProvider::class,
         'critical' => false,
     ],
+
+    // --- Пользовательские модули (app/modules/, PSR-4 "App\modules\") ---
+    // Auth: учётные записи (таблица users, миграция 2026_10_28_*). Уровень 5+:
+    // после Database/Session/Hook/Template; все зависимости опциональны.
+    'Auth' => [
+        'provider' => \App\modules\Auth\Providers\AuthServiceProvider::class,
+        'critical' => false,
+    ],
+    // Pages: страницы контента (таблица pages). Уровень 5+: после Database/Template/Error.
+    'Pages' => [
+        'provider' => \App\modules\Pages\Providers\PagesServiceProvider::class,
+        'critical' => false,
+    ],
 ];
