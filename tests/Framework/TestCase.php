@@ -81,6 +81,22 @@ abstract class TestCase
         $this->assertSame(null, $value, $message);
     }
 
+    /** @param \Countable|array<int|string,mixed>|string $haystack */
+    protected function assertCount(int $expected, mixed $haystack, string $message = ''): void
+    {
+        if (!is_array($haystack) && !($haystack instanceof \Countable) && !is_string($haystack)) {
+            $this->fail('assertCount: значение не подсчётное (' . get_debug_type($haystack) . ').');
+        }
+
+        $actual = is_string($haystack) ? strlen($haystack) : count($haystack);
+        if ($actual !== $expected) {
+            $this->fail(
+                ($message !== '' ? $message . ' ' : '') .
+                "Ожидалось элементов: {$expected}, получено: {$actual}."
+            );
+        }
+    }
+
     protected function assertNotNull(mixed $value, string $message = ''): void
     {
         if ($value === null) {

@@ -26,12 +26,12 @@ use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 
 $command = $argv[1] ?? 'doctor';
 
-$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status', 'test', 'lint-rules'];
+$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status', 'sites', 'site:add', 'test', 'lint-rules'];
 if (!in_array($command, $allowed, true)) {
     echo "Неизвестная команда: {$command}\n"
         . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
         . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status"
-        . " | test | lint-rules\n";
+        . " | sites | site:add <домен> <тема> [заголовок] | test | lint-rules\n";
     exit(1);
 }
 
@@ -176,6 +176,45 @@ try {
                 echo "📝 Создана заготовка: " . $migrator->make($arg) . "\n";
                 exit(0);
         }
+    }
+
+    // --- Команды модуля Theme (мультисайт: реестр доменов и тем) ---
+    if ($command === 'sites') {
+        /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+        $themes = $c->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+        $sites  = $themes->sites();
+        if ($sites === []) {
+            echo "🌐 Реестр сайтов пуст (БД недоступна или таблица engine_sites не создана — выполните 'php bin/engine migrate').\n";
+            exit(0);
+        }
+        echo "🌐 Сайты мультисайта (домен -> тема view/app/):\n";
+        foreach ($sites as $site) {
+            $mark = $themes->exists((string) $site['theme']) ? '✅' : '⚠️';
+            echo sprintf("  %s %-24s -> %-16s %s\n", $mark, $site['domain'], $site['theme'], $site['title'] ?? '');
+        }
+        echo "Темы на диске: " . implode(', ', $themes->available()) . "\n";
+        exit(0);
+    }
+
+    if ($command === 'site:add') {
+        /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+        $themes = $c->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+        $domain = (string) ($argv[2] ?? '');
+        $theme  = (string) ($argv[3] ?? '');
+        $title  = (string) ($argv[4] ?? '');
+        if ($domain === '' || $theme === '') {
+            echo "Использование: php bin/engine site:add <домен> <тема> [заголовок]\n";
+            exit(1);
+        }
+        if (!$themes->registerSite($domain, $theme, $title)) {
+            echo "❌ Не удалось зарегистрировать сайт (БД недоступна или не установлена — 'php bin/engine migrate').\n";
+            exit(1);
+        }
+        echo "✅ Сайт '{$domain}' привязан к теме '{$theme}'.\n";
+        echo $themes->exists($theme)
+            ? "   Тема уже существует в view/app/.\n"
+            : "   Папки темы ещё нет — она будет автоматически клонирована из view/app/_starter при первом запросе к домену.\n";
+        exit(0);
     }
 
     check('Config загружен', $c->get(ConfigRepositoryInterface::class)->has('app.name'));

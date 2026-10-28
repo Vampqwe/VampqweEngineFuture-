@@ -325,12 +325,38 @@ class Kernel
         $status = $dbOk ? 200 : 503;
 
         // Мультисайт: тема сайта по домену запроса — через модуль Theme
-        // (реестр engine_sites -> эвристика поддомена -> дефолт из конфига).
+        // (реестр engine_sites -> эвристика поддомена -> дефолт из config/template.php).
         $theme = '';
+        $site  = null;
         if ($this->container->has(\App\Core\Module\Theme\Contracts\ThemeInterface::class)) {
             /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
             $themes = $this->container->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
-            $theme  = $themes->resolveForRequest($request->header('host') ?? '');
+            $host   = $request->header('host') ?? '';
+            $theme  = $themes->resolveForRequest($host);
+            $site   = $themes->site();
+
+            // Тема резолвлена, но её папки ещё нет (только что добавленный
+            // сайт) — авто-клон стартера view/app/_starter. Движок не падает:
+            // до клонирования рендер идёт через fallback '_default' в Template.
+            if ($site !== null && $site['theme'] !== '' && !$themes->exists($site['theme'])
+                && $this->container->has(\App\Core\Module\FileSystem\Contracts\FileSystemInterface::class)) {
+                $fs      = $this->container->get(\App\Core\Module\FileSystem\Contracts\FileSystemInterface::class);
+                $appView = (string) $this->container->get('app_view_path');
+                $starter = $appView . '/_starter';
+                $target  = $appView . '/' . $site['theme'];
+                if ($fs->isDirectory($starter) && $this->cloneStarter($fs, $starter, $target)) {
+                    $themes->use($site['theme']);
+                    $theme = $site['theme'];
+                }
+            }
+
+            // Хук мультисайта: сторонние модули реагируют на резолв сайта
+            // без правки ядра (п.4 Конституции).
+            if ($theme !== '' && $this->container->has(HookInterface::class)) {
+                /** @var HookInterface $hooks */
+                $hooks = $this->container->get(HookInterface::class);
+                $hooks->dispatch('theme.resolved', $theme, $site, $host);
+            }
         } elseif ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
             // Fallback без Theme-модуля: прежняя эвристика поддомена.
             $theme = $this->resolveThemeByHost($request->header('host') ?? '');
@@ -351,6 +377,7 @@ class Kernel
                     'dbOk'       => $dbOk,
                     'dbDriver'   => $dbDriver,
                     'dbError'    => $dbError,
+                    'site'       => $site,
                 ]);
                 return new Response($body, $status);
             } catch (\Throwable $e) {
@@ -367,6 +394,38 @@ class Kernel
             ? "✅ <b>" . htmlspecialchars($appName, ENT_QUOTES) . "</b> (Debug: " . ($debug ? 'ON' : 'OFF') . ") успешно запущен!"
             : "⚠️ <b>" . htmlspecialchars($appName, ENT_QUOTES) . "</b>: база данных «" . htmlspecialchars($dbDriver, ENT_QUOTES) . "» недоступна.";
         return new Response($body, $status);
+    }
+
+    /**
+     * Мультисайт: рекурсивно клонирует папку-стартер темы (view/app/_starter)
+     * в новую тему сайта. best effort: любой сбой FS означает «папки нет»,
+     * рендер уйдёт через fallback '_default' — движок не падает (принцип п.9).
+     */
+    private function cloneStarter(
+        \App\Core\Module\FileSystem\Contracts\FileSystemInterface $fs,
+        string $source,
+        string $target,
+    ): bool {
+        if (!$fs->createDirectory($target)) {
+            return false;
+        }
+
+        foreach ((array) glob($source . '/*') as $entry) {
+            $name = $fs->basename((string) $entry);
+            if ($name === '' || $name[0] === '.') {
+                continue;
+            }
+            $dest = $target . '/' . $name;
+            if (is_dir($entry)) {
+                if (!$this->cloneStarter($fs, (string) $entry, $dest)) {
+                    return false;
+                }
+            } elseif (!$fs->copy((string) $entry, $dest)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

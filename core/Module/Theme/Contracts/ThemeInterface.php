@@ -23,6 +23,31 @@ interface ThemeInterface
      */
     public function resolveForRequest(string $host): string;
 
+    /**
+     * Резолвить САЙТ мультисайта для хоста запроса (без побочных эффектов):
+     *   ['domain' => ..., 'theme' => ..., 'title' => ...] или null,
+     * если реестр пуст / БД недоступна. Тема из карточки может не
+     * существовать как папка — тогда рендер идёт через fallback '_default'
+     * модуля Template (движок не падает).
+     *
+     * @return array{domain:string,theme:string,title:string}|null
+     */
+    public function resolveSite(string $host): ?array;
+
+    /**
+     * Карточка сайта, резолвленного для ПОСЛЕДНЕГО запроса
+     * (или переданного хоста); null — если реестр недоступен.
+     *
+     * @return array{domain:string,theme:string,title:string}|null
+     */
+    public function site(?string $host = null): ?array;
+
+    /**
+     * Зарегистрировать сайт в реестре (домен -> тема). Идемпотентно по домену.
+     * false — если БД недоступна/не установлена или таблица не пишет.
+     */
+    public function registerSite(string $domain, string $theme, string $title = ''): bool;
+
     /** Немедленно переключить шаблонизатор на тему (без проверки домена). */
     public function use(string $theme): void;
 
