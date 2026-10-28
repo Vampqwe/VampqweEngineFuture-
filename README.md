@@ -52,12 +52,12 @@
 
 ---
 
-## 🎨 Правила стиля (проверено по факту: 166/166 файлов)
+## 🎨 Правила стиля (проверено по факту: 168/168 файлов)
 
-Фактическая проверка репозитория: **все 166 PHP-файлов** (core, app, tests, config, public)
+Фактическая проверка репозитория: **все 168 PHP-файлов** (core, app, tests, config, public, migrations)
 содержат `declare(strict_types=1)`. Это инвариант, а не рекомендация.
 
-1. `declare(strict_types=1)` — **первая строка после `<?php` в каждом файле без исключений** (166/166 ✓).
+1. `declare(strict_types=1)` — **первая строка после `<?php` в каждом файле без исключений** (168/168 ✓).
 2. PSR-4: `App\Core\` → `core/`, `App\` → `app/`, `Tests\` → `tests/`; регистр namespace совпадает с регистром директорий.
 3. Только современные фичи PHP 8.1+: enums, readonly-свойства, match, named arguments, first-class callable syntax.
 4. Подробные PHPDoc на русском у каждого класса/контракта со ссылкой на пункт Конституции (`п.N Конституции`), где это применимо.
@@ -85,7 +85,7 @@
 ├── logs/            ← логи по каналам: logs/<дата>/<Модуль>.log
 ├── database/        ← SQL-дампы схемы (db.sql)
 ├── migrations/      ← версии схемы БД (<ГГГГ_ММ_ДД_HHMMSS>_имя.php)
-├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T3)
+├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T3, SecretLeakCheck)
 ├── docs/            ← CONSTITUTION.md — реестр «правило → чем проверяется» (Теорема синхронизации)
 ├── .github/workflows/ci.yml ← merge-gate: lint-rules ∧ test ∧ doctor (sqlite-стенд из .env.example)
 ├── bin/             ← CLI: php bin/engine doctor | migrate | sites | site:add | test | lint-rules

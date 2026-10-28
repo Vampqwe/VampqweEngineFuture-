@@ -179,6 +179,10 @@ final class ArchitectureLinter
         // Инспекция исходников ядра (T3 теоремы): читает core/System/** как данные;
         // поиск корня репозитория через dirname — легален с аннотацией п.7 (R8 требует её).
         'tests/Unit/KernelBoundaryTest.php',
+        // Юнит-тест внутренней проверки Doctor (детектор утечки секретов в git):
+        // обязан иметь доступ к объекту теста (Checks\SecretLeakCheck — Internal-зона
+        // модуля Doctor, п.2); поиск корня через dirname — тот же легальный паттерн п.7.
+        'tests/Unit/SecretLeakCheckTest.php',
     ];
 
     public function __construct(private readonly string $basePath)

@@ -27,10 +27,27 @@ final class SecretLeakCheck
     private const MAX_SCANNED_FILES = 3000;
 
     /**
+     * Точка входа Doctor: проверка живого дерева проекта.
+     *
      * @param string $repoPath корень репозитория (только для чтения)
      * @return array{name:string,ok:bool,message:string}
      */
     public static function run(string $repoPath): array
+    {
+        return self::check($repoPath, self::SECRET_KEYS);
+    }
+
+    /**
+     * Ядро проверки — чистая функция от пары аргументов (детерминирована,
+     * покрыта юнит-тестом tests/Unit/SecretLeakCheckTest.php на временном
+     * git-стенде). Список секретных ключей параметризован только ради теста;
+     * продакшн вызывает run() с константным списком SECRET_KEYS.
+     *
+     * @param string       $repoPath   корень «репозитория» (директория со своим .git)
+     * @param list<string> $secretKeys ключи .env, чьи значения считаются секретами
+     * @return array{name:string,ok:bool,message:string}
+     */
+    public static function check(string $repoPath, array $secretKeys): array
     {
         $name = 'Секреты';
 
@@ -38,16 +55,17 @@ final class SecretLeakCheck
             return ['name' => $name, 'ok' => true, 'message' => 'не git-репозиторий — проверка пропущена'];
         }
 
-        // 1) .env заигнорен?
+        // 1) .env заигнорен правилом?
         $ignoreOut = self::exec('git check-ignore .env', $repoPath);
         if ($ignoreOut === null) {
             return ['name' => $name, 'ok' => false, 'message' => 'git недоступен — проверка не выполнена'];
         }
-        if (trim($ignoreOut) !== '.env') {
-            return ['name' => $name, 'ok' => false, 'message' => '.env НЕ исключён через .gitignore (п.8)'];
-        }
+        $ignoredByRule = trim($ignoreOut) === '.env';
 
         // 2) .env не в индексе?
+        // Порядок проверок осознанный: ссылка в индексе сильнее ignore-правила
+        // (git хранит отслеживаемые файлы независимо от .gitignore), поэтому
+        // «закоммиченный .env» ловим раньше и жёстче, чем «не заигнорен».
         $tracked = self::exec('git ls-files -- .env', $repoPath);
         if ($tracked === null) {
             return ['name' => $name, 'ok' => false, 'message' => 'git ls-files завершился ошибкой'];
@@ -55,12 +73,40 @@ final class SecretLeakCheck
         if (trim($tracked) !== '') {
             return ['name' => $name, 'ok' => false, 'message' => '.env закоммичен в репозиторий (п.8)!'];
         }
+        if (!$ignoredByRule) {
+            return ['name' => $name, 'ok' => false, 'message' => '.env НЕ исключён через .gitignore (п.8)'];
+        }
 
         // 3) Значения секретов из локального .env не гуляют по индексу?
         $envFile = $repoPath . '/.env';
         if (!is_file($envFile)) {
             return ['name' => $name, 'ok' => true, 'message' => '.env в ignore, индекс чист (нет локального .env для сверки)'];
         }
+        $secrets = self::extractSecrets($envFile, $secretKeys);
+        if ($secrets === []) {
+            return ['name' => $name, 'ok' => true, 'message' => '.env в ignore, секретных значений нет (или это стенд)'];
+        }
+
+        $listOut = self::exec('git ls-files', $repoPath);
+        if ($listOut === null) {
+            return ['name' => $name, 'ok' => false, 'message' => 'git ls-files завершился ошибкой'];
+        }
+        $leak = self::scanIndex($repoPath, $secrets, $listOut);
+        if ($leak !== null) {
+            return ['name' => $name, 'ok' => false, 'message' => $leak];
+        }
+
+        return ['name' => $name, 'ok' => true, 'message' => '.env в ignore, секреты в индексе не найдены'];
+    }
+
+    /**
+     * Разбор .env: значения секретных ключей длиной >= 8 символов.
+     *
+     * @param list<string> $secretKeys
+     * @return array<string,string> key => value
+     */
+    private static function extractSecrets(string $envFile, array $secretKeys): array
+    {
         $secrets = [];
         foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
             $line = trim($line);
@@ -72,19 +118,23 @@ final class SecretLeakCheck
                 continue;
             }
             $key   = trim(substr($line, 0, $pos));
-            $value = trim(trim(substr($line, $pos + 1)), "\"'");
-            if (in_array($key, self::SECRET_KEYS, true) && strlen($value) >= 8) {
+            $value = trim(trim(substr($line, $pos + 1)), "\"\'");
+            if (in_array($key, $secretKeys, true) && strlen($value) >= 8) {
                 $secrets[$key] = $value;
             }
         }
-        if ($secrets === []) {
-            return ['name' => $name, 'ok' => true, 'message' => '.env в ignore, секретных значений нет (или это стенд)'];
-        }
 
-        $listOut = self::exec('git ls-files', $repoPath);
-        if ($listOut === null) {
-            return ['name' => $name, 'ok' => false, 'message' => 'git ls-files завершился ошибкой'];
-        }
+        return $secrets;
+    }
+
+    /**
+     * Сканирует текстовые файлы индекса на наличие значений секретов.
+     *
+     * @param array<string,string> $secrets
+     * @return string|null сообщение об утечке (null — индекс чист)
+     */
+    private static function scanIndex(string $repoPath, array $secrets, string $listOut): ?string
+    {
         $files = array_slice(preg_split('/\r\n|\r|\n/', trim($listOut)) ?: [], 0, self::MAX_SCANNED_FILES);
         foreach ($files as $rel) {
             $abs = $repoPath . '/' . $rel;
@@ -97,12 +147,12 @@ final class SecretLeakCheck
             }
             foreach ($secrets as $key => $value) {
                 if (str_contains($contents, $value)) {
-                    return ['name' => $name, 'ok' => false, 'message' => "значение {$key} найдено в {$rel} (утечка секрета!)"];
+                    return "значение {$key} найдено в {$rel} (утечка секрета!)";
                 }
             }
         }
 
-        return ['name' => $name, 'ok' => true, 'message' => '.env в ignore, секреты в индексе не найдены'];
+        return null;
     }
 
     /** @return string|null stdout команды; null — если git вообще недоступен (shell_exec/exec нет) */
