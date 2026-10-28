@@ -26,11 +26,33 @@ use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 
 $command = $argv[1] ?? 'doctor';
 
-$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status'];
+$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status', 'test', 'lint-rules'];
 if (!in_array($command, $allowed, true)) {
     echo "Неизвестная команда: {$command}\n"
         . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
-        . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status\n";
+        . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status"
+        . " | test | lint-rules\n";
+    exit(1);
+}
+
+// Тесты — без инициализации ядра: собственный фреймворк (п. «тестовый фреймворк»).
+if ($command === 'test') {
+    require BASE_PATH . '/tests/run.php';
+    exit(0); // run.php сам вызывает exit с нужным кодом
+}
+
+// Статический контроль архитектуры/стиля (п.5 плана): Constitution-правила как код.
+if ($command === 'lint-rules') {
+    $linter = new \App\Core\System\Support\ArchitectureLinter(BASE_PATH);
+    $violations = $linter->run();
+    if ($violations === []) {
+        echo "🧹 lint-rules: нарушений Конституции и стиля не найдено ✅\n";
+        exit(0);
+    }
+    foreach ($violations as $v) {
+        echo "❌ {$v}\n";
+    }
+    echo 'Найдено нарушений: ' . count($violations) . "\n";
     exit(1);
 }
 

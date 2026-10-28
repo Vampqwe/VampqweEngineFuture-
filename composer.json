@@ -12,6 +12,10 @@
     "require": {
         "php": ">=8.1"
     },
+    "scripts": {
+        "test": "php tests/run.php",
+        "lint-rules": "php bin/engine lint-rules"
+    },
     "autoload": {
         "psr-4": {
             "App\\Core\\": "core/",

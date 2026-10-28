@@ -217,7 +217,9 @@ PHP;
             throw new RuntimeException("Модуль [Migration]: не удалось создать папку {$this->migrationsPath}.");
         }
 
-        $id = str_replace(['-', ' ', ':'], '_', $this->time->format('Y_m_d_His', $this->time->now())) . '_' . $safe;
+        // Контракт TimeDateInterface::format(DateTimeInterface $date, string $format) —
+        // аргументы были переставлены местами (TypeError в тестах, п.3 DI-контракты).
+        $id = str_replace(['-', ' ', ':'], '_', $this->time->format($this->time->now(), 'Y_m_d_His')) . '_' . $safe;
         $file = $this->migrationsPath . '/' . $id . '.php';
         if (file_exists($file)) {
             throw new RuntimeException("Модуль [Migration]: файл [{$id}].php уже существует.");
