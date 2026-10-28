@@ -133,7 +133,7 @@ final class AssetsRegistry implements AssetsInterface
     }
 
     /**
-     * Версия для кэш-бустинга: 8 hex-симворов md5 от mtime+size первого
+     * Версия для кэш-бустинга: 8 hex-симворов md5 от mtime+size+hash содержимого первого
      * существующего файла каскада. Счёт идёт по всем зарегистрированным
      * src'там за один запрос (статичный кэш на экземпляр реестра).
      */
@@ -149,7 +149,11 @@ final class AssetsRegistry implements AssetsInterface
         foreach ($this->candidates($rel) as $abs) {
             clearstatcache(true, $abs);
             if (is_file($abs)) {
-                $version = substr(md5((string) (filemtime($abs) ?: 0) . ':' . (filesize($abs) ?: 0)), 0, 8);
+                // mtime+size не различают перезапись того же размера за одну
+                // секунду — добавляем hash содержимого (файлы статики малы).
+                $stat = (string) (filemtime($abs) ?: 0) . ':' . (filesize($abs) ?: 0)
+                    . ':' . (@file_get_contents($abs) ?: '');
+                $version = substr(md5($stat), 0, 8);
                 break;
             }
         }
@@ -159,8 +163,19 @@ final class AssetsRegistry implements AssetsInterface
 
     public function useContext(?string $domain, string $theme): void
     {
-        $this->domain = $domain !== null && $domain !== '' ? $domain : null;
-        $this->theme  = preg_match('#^[A-Za-z0-9_\-]+$#', $theme) ? $theme : '';
+        $newDomain = $domain !== null && $domain !== '' ? $domain : null;
+        $newTheme  = preg_match('#^[A-Za-z0-9_\-]+$#', $theme) ? $theme : '';
+
+        // Смена контекста (сайт/тема) меняет каскад «site -> theme -> core» —
+        // значит и резолв файлов для версионирования. Инвалидируем кэш, иначе
+        // второй сайт на том же экземпляре реестра получил бы ?v= от чужого
+        // каскада (утечка версии между доменами).
+        if ($newDomain !== $this->domain || $newTheme !== $this->theme) {
+            $this->versionCache = [];
+        }
+
+        $this->domain = $newDomain;
+        $this->theme  = $newTheme;
     }
 
     /** Домен/тема текущего запроса (заполняется Kernel'ом через useContext). */
