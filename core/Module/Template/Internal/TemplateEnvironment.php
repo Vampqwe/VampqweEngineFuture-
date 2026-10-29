@@ -70,7 +70,15 @@ final class TemplateEnvironment
 
     public function share(array $globals): void
     {
-        $this->shared = $globals;
+        // merge, а не замена: последующие вызовы (например, резолвер статики
+        // для страниц ошибок) дополняют глобальный пул, а не затирают его.
+        $this->shared = array_merge($this->shared, $globals);
+    }
+
+    /** Текущий пул разделяемых глобалей (для аддитивных вставок из System). */
+    public function sharedGlobals(): array
+    {
+        return $this->shared;
     }
 
     /** Точка входа: отрендерить PHP-код скомпилированного шаблона. */

@@ -65,6 +65,17 @@ class Kernel
         // установки — их пускаем как раньше (страницы прогресса).
         if ($this->isInstallerPath($request->path)
             && !($state === AppState::Installing && $request->method === 'POST')) {
+            // Единая системная тема (engine.css) для страниц установщика:
+            // реестр Assets уже резолвится через Bridge выше ($assets).
+            // Публикация тегов — опциональна: без Template установщик
+            // отдаёт legacy-HTML со встроенными стилями (п.9: не падать).
+            if ($assets !== null) {
+                $assets->registerStyle('engine', 'css/engine.css', [], \App\Core\Module\Assets\Contracts\AssetsInterface::SCOPE_CORE);
+                $tpl = $this->bridge->templates();
+                if ($tpl !== null) {
+                    $tpl->share('assetsStyles', $assets->styles());
+                }
+            }
             return $this->installerResponse($request);
         }
 

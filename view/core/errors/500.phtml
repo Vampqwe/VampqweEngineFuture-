@@ -1,7 +1,7 @@
 @extends('layouts/base')
 @section('title') 500 — {{ $title }} · {{ $appName }} @endsection
 @section('content')
-    <p class="code">500</p>
+    <p class="code-big">500</p>
     <h1>{{ $title }}</h1>
     @if($debug && $exception !== null)
         <pre>{{ $exception->getMessage() }}
