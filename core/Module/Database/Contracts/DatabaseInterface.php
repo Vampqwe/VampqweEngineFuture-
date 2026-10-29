@@ -36,8 +36,15 @@ interface DatabaseInterface
      */
     public function lastInsertId(): int;
 
-    /** Прогон SQL-дампа (DDL схемы) через активное соединение. @return int выполненных операторов */
-    public function migrate(string $sql): int;
+    /**
+     * Прогон SQL-дампа (DDL схемы) через активное соединение.
+     * @return int выполненных операторов
+     *
+     * $skipExisting — режим идемпотентной досоздки: операторы CREATE TABLE для
+     * уже существующих таблиц пропускаются (защита от «table already exists»
+     * при частично развёрнутой схеме, см. Installer::applySchema).
+     */
+    public function migrate(string $sql, bool $skipExisting): int;
 
     /** Существует ли таблица в активной БД (идемпотентность миграций/схемы). */
     public function tableExists(string $table): bool;

@@ -457,7 +457,12 @@ final class Installer implements InstallerInterface, InstallerPageInterface
                 return 'уже развёрнута (' . count($tables) . ' таблиц схемы обнаружено, пропущено)';
             }
 
-            $statements = $this->db->migrate($this->fs->read($dumpFile));
+            // Прогон дампа идемпотентен ТОЛЬКО в режиме полного набора (см.
+            // DatabaseInterface::migrate): при частично развёрнутой схеме
+            // (например, после упавшего оператора) уже существующие таблицы
+            // пропускаются, недостающие — досоздаются. Без этого шага повторная
+            // установка падала на «table already exists».
+            $statements = $this->db->migrate($this->fs->read($dumpFile), skipExisting: true);
 
             $this->logger->info("Схема БД развёрнута: {$statements} операторов из db.sql", [
                 'channel' => 'Installer',

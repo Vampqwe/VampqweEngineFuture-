@@ -56,7 +56,15 @@ class Kernel
 
         // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
         // до установки это единственный способ довести движок до Running.
-        if ($this->isInstallerPath($request->path)) {
+        // Исключение из «любого состояния» — Installing: во время POST /install/run
+        // install() создаёт storage/.installing (внутри одного запроса), а повторный
+        // вход в installerResponse вызвал бы requirements()/validateSettings() с
+        // побочным эффектом AppState::detect()==Installing -> 503 «Идет установка».
+        // На время собственного выполнения установщика его страницы не перезаходятся;
+        // для GET-запросов флаг Installing физически не может стоять без зависшей
+        // установки — их пускаем как раньше (страницы прогресса).
+        if ($this->isInstallerPath($request->path)
+            && !($state === AppState::Installing && $request->method === 'POST')) {
             return $this->installerResponse($request);
         }
 

@@ -28,11 +28,17 @@ use RuntimeException;
 final class SqlFileRunner
 {
     /** @return list<string> выполненные операторы (для логов/отчётов) */
-    public function run(PDO $pdo, string $sql, string $driver = 'mysql'): array
+    public function run(PDO $pdo, string $sql, string $driver = 'mysql', array $existingTables = []): array
     {
         $executed = [];
 
         foreach ($this->statements($sql) as $statement) {
+            // Идемпотентная досоздка: CREATE TABLE уже существующей таблицы
+            // пропускаем (иначе повторный прогон дампа падает на DDL-конфликте).
+            if ($existingTables !== [] && $this->createsExistingTable($statement, $existingTables)) {
+                continue;
+            }
+
             if ($driver === 'mysql') {
                 try {
                     $pdo->exec($statement);
@@ -71,7 +77,23 @@ final class SqlFileRunner
         return $executed;
     }
 
-    /** @param list<string> $executed */
+    /**
+     * Идемпотентная досоздка: определяет, создаёт ли данный оператор таблицу,
+     * которая уже присутствует в СУБД (список $existingTables из information_schema
+     * / sqlite_master). Используется при повторном прогоне дампа схемы (re-install),
+     * чтобы не падать на DDL-конфликте "table already exists".
+     *
+     * @param list<string> $existingTables имена существующих таблиц (в нижнем регистре)
+     */
+    private function createsExistingTable(string $statement, array $existingTables): bool
+    {
+        if (!preg_match('/^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"\[]?([A-Za-z0-9_]+)[`"\]]?/i', $statement, $m)) {
+            return false; // CREATE TABLE ... AS SELECT / прочее — не наш случай
+        }
+
+        return in_array(strtolower($m[1]), $existingTables, true);
+    }
+
     private function execute(PDO $pdo, string $statement, array &$executed): void
     {
         try {

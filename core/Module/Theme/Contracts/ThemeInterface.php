@@ -21,7 +21,7 @@ interface ThemeInterface
      * а не в классе Theme: ядро (Kernel) резолвит дефолт по интерфейсу и не
      * знает конкретную реализацию (п.1/п.2, правило R6 линтера).
      */
-    public const DEFAULT_THEME = '_default';
+    public const DEFAULT_THEME = 'engineStart';
 
     /**
      * Активировать тему для домена запроса: БД-реестр engine_sites ->
@@ -34,7 +34,7 @@ interface ThemeInterface
      * Резолвить САЙТ мультисайта для хоста запроса (без побочных эффектов):
      *   ['domain' => ..., 'theme' => ..., 'title' => ...] или null,
      * если реестр пуст / БД недоступна. Тема из карточки может не
-     * существовать как папка — тогда рендер идёт через fallback '_default'
+     * существовать как папка — тогда рендер идёт через fallback engineStart
      * модуля Template (движок не падает).
      *
      * @return array{domain:string,theme:string,title:string}|null

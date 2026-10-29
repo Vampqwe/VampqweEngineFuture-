@@ -40,7 +40,7 @@ interface TemplateInterface
 
     /**
      * Активировать тему пользовательского сайта (мультисайт).
-     * Путь: view/app/<theme>/; fallback на theme '_default'.
+     * Путь: view/app/<theme>/; fallback на theme engineStart.
      */
     public function setTheme(string $theme): void;
 

@@ -148,7 +148,7 @@ Host получает 404 вместо обслуживания; при пуст
 (`Theme::ensureSite`, идемпотентно — не перетирает тему/заголовок, выбранные админом).
 Второй сайт = второй экземпляр движка со своим `.env`.
 
-Домен резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/_starter` (движок не падает).
+Домен резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/engineStart-starter` (движок не падает).
 
 Матрица строгости (strict / мягкий / legacy) автоматизирована интеграционным HTTP-контуром:
 `tests/Integration/SiteIdentityHttpTest.php` поднимает встроенный сервер PHP из тест-раннера
@@ -156,7 +156,7 @@ Host получает 404 вместо обслуживания; при пуст
 
 ```bash
 php bin/engine migrate                      # создаёт таблицу engine_sites
-php bin/engine site:add shop.test animals   # домен -> тема (клон из _starter при первом запросе)
+php bin/engine site:add shop.test mysite      # домен -> тема (клон из engineStart-starter при первом запросе)
 php bin/engine sites                        # список сайтов реестра
 ```
 

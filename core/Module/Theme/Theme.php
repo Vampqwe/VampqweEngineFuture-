@@ -22,7 +22,7 @@ use App\Core\Module\Template\Contracts\TemplateInterface;
 final class Theme implements ThemeInterface
 {
     /** Специальная тема-фолбэк для сайтов без своей папки. */
-    public const DEFAULT_THEME = '_default';
+    public const DEFAULT_THEME = 'engineStart';
 
     private string $current;
 
@@ -149,7 +149,7 @@ final class Theme implements ThemeInterface
     public function exists(string $theme): bool
     {
         // Только безопасное имя папки-темы (та же защита, что в Template::setTheme):
-        // 'animals', '_default'; всё остальное ('../x', пустое) — не тема.
+        // 'animals', engineStart; всё остальное ('../x', пустое) — не тема.
         if (!preg_match('#^[A-Za-z0-9_\-]+$#', $theme)) {
             return false;
         }

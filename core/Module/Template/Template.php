@@ -20,14 +20,14 @@ use RuntimeException;
  *
  * Мультисайт: Kernel при обработке запроса вызывает setTheme(тема_сайта)
  * (тема берётся из БД: домен -> theme). Если шаблона в теме нет — fallback
- * на '_default', затем — ошибка с понятным текстом.
+ * на engineStart, затем — ошибка с понятным текстом.
  *
  * Кэш компиляции: storage/cache/templates/<md5(путь)>_<mtime>.php —
  * инвалидация по mtime исходника автоматическая.
  */
 final class Template implements TemplateInterface
 {
-    public const DEFAULT_THEME = '_default';
+    public const DEFAULT_THEME = 'engineStart';
 
     private Compiler $compiler;
     private Escaper $escaper;
@@ -64,7 +64,7 @@ final class Template implements TemplateInterface
             throw new InvalidArgumentException("Неизвестный scope шаблона: [{$scope}].");
         }
 
-        // Мультисайт: тема сайта -> fallback '_default'.
+        // Мультисайт: тема сайта -> fallback engineStart.
         $file = $this->locateInApp($template);
         if ($file === null) {
             throw new RuntimeException(sprintf(
@@ -125,7 +125,7 @@ final class Template implements TemplateInterface
 
     // ================================ внутреннее ================================
 
-    /** Поиск файла шаблона в app-разделе: активная тема, затем _default. */
+    /** Поиск файла шаблона в app-разделе: активная тема, затем engineStart. */
     private function locateInApp(string $name): ?string
     {
         $name = $this->compiler->normalizeName($name);
