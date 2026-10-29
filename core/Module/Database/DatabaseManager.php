@@ -107,11 +107,48 @@ final class DatabaseManager implements DatabaseInterface
      *
      * @return int количество выполненных операторов
      */
-    public function migrate(string $sql): int
+    public function migrate(string $sql, bool $skipExisting): int
     {
         // Дампы из phpMyAdmin содержат MySQL-директивы (SET SQL_MODE и т.п.) —
         // исполнитель пропускает их для не-mysql драйверов (переносимость схемы).
-        return count((new SqlFileRunner())->run($this->pdo(), $sql, $this->driver()));
+        // В режиме skipExisting уже созданные таблицы досоздавать не пытаемся:
+        // повторная установка/частичная схема не должна падать на DDL-конфликте.
+        $existing = $skipExisting ? $this->existingTables() : [];
+
+        return count((new SqlFileRunner())->run($this->pdo(), $sql, $this->driver(), $existing));
+    }
+
+    /**
+     * Имена таблиц, уже присутствующих в активной БД (для идемпотентного
+     * пропуска CREATE TABLE). Диалект-специфичные каталоги; ошибки чтения
+     * каталога трактуются как «таблиц нет» (честный прогон с обычным fail).
+     *
+     * @return array<string,true> lowercase => есть
+     */
+    private function existingTables(): array
+    {
+        $sql = match ($this->driver()) {
+            'mysql'  => 'SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()',
+            'pgsql'  => 'SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()',
+            'sqlite' => "SELECT name FROM sqlite_master WHERE type = 'table'",
+            default  => null,
+        };
+        if ($sql === null) {
+            return [];
+        }
+
+        try {
+            $rows = $this->pdo()->query($sql)->fetchAll(\PDO::FETCH_NUM);
+        } catch (\PDOException) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[strtolower((string) $row[0])] = true;
+        }
+
+        return $out;
     }
 
     /** Существует ли таблица в активной БД (information_schema/sqlite_master). */

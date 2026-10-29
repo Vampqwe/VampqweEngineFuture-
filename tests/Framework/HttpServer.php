@@ -52,12 +52,54 @@ final class HttpServer
         return $this->port;
     }
 
+    /** Каталог стенда (для проверки артефактов установки: .env, storage/*). */
+    public function dir(): string
+    {
+        return $this->dir;
+    }
+
+    /** Файл стенда существует? (напр. 'storage/.installed' или '.env'). */
+    public function has(string $relative): bool
+    {
+        return is_file($this->dir . '/' . ltrim($relative, '/'));
+    }
+
+    /** Содержимое файла стенда ('' если отсутствует). */
+    public function readFile(string $relative): string
+    {
+        $path = $this->dir . '/' . ltrim($relative, '/');
+
+        return is_file($path) ? (string) file_get_contents($path) : '';
+    }
+
     /**
      * GET-запрос к стенду. Возвращает ['status' => int, 'body' => string].
      * Пишем/читаем сокетом напрямую: file_get_contents с потоком не даёт
      * надёжного доступа к статусу ответа, а нам нужны и 4xx (strict-режим).
      */
     public function get(string $path, string $host): array
+    {
+        return $this->send('GET', $path, $host, null);
+    }
+
+    /**
+     * POST-запрос с form-urlencoded телом (нужен для прогона установщика:
+     * POST /install/run — тот самый контур, где была регрессия 503 из-за
+     * рекурсивной блокировки AppState::Installing).
+     *
+     * @param array<string,string> $fields
+     * @return array{status:int,body:string}
+     */
+    public function post(string $path, string $host, array $fields): array
+    {
+        return $this->send('POST', $path, $host, http_build_query($fields));
+    }
+
+    /**
+     * @param string|null $body тело запроса (для POST)
+     * @return array{status:int,body:string}
+     */
+    private function send(string $method, string $path, string $host, ?string $body): array
     {
         $sock = @stream_socket_client(
             'tcp://127.0.0.1:' . $this->port,
@@ -70,11 +112,15 @@ final class HttpServer
         }
         stream_set_timeout($sock, 10);
 
-        $request = "GET {$path} HTTP/1.1\r\n"
+        $headers = "{$method} {$path} HTTP/1.1\r\n"
             . "Host: {$host}\r\n"
-            . "Connection: close\r\n"
-            . "\r\n";
-        fwrite($sock, $request);
+            . "Connection: close\r\n";
+        if ($body !== null) {
+            $headers .= "Content-Type: application/x-www-form-urlencoded\r\n"
+                . 'Content-Length: ' . strlen($body) . "\r\n";
+        }
+        $headers .= "\r\n";
+        fwrite($sock, $headers . ($body ?? ''));
 
         $raw = '';
         while (!feof($sock)) {

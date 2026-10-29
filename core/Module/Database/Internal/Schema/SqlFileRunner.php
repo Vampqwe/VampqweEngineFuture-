@@ -28,11 +28,17 @@ use RuntimeException;
 final class SqlFileRunner
 {
     /** @return list<string> выполненные операторы (для логов/отчётов) */
-    public function run(PDO $pdo, string $sql, string $driver = 'mysql'): array
+    public function run(PDO $pdo, string $sql, string $driver = 'mysql', array $existingTables = []): array
     {
         $executed = [];
 
         foreach ($this->statements($sql) as $statement) {
+            // Идемпотентная досоздка: CREATE TABLE уже существующей таблицы
+            // пропускаем (иначе повторный прогон дампа падает на DDL-конфликте).
+            if ($existingTables !== [] && $this->createsExistingTable($statement, $existingTables)) {
+                continue;
+            }
+
             if ($driver === 'mysql') {
                 try {
                     $pdo->exec($statement);
