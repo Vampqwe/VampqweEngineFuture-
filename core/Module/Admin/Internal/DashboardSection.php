@@ -57,9 +57,21 @@ final class DashboardSection implements AdminSectionInterface
         if ($this->db !== null) {
             foreach (['pages' => 'Страниц', 'users' => 'Пользователей', 'redirects' => 'Редиректов'] as $table => $label) {
                 if ($this->db->tableExists($table)) {
-                    $row   = $this->db->selectOne('SELECT COUNT(*) AS c FROM `' . $table . '`');
+                    $row   = $this->db->selectOne('SELECT COUNT(*) AS c FROM `' . $table . '`', []);
                     $stats[] = ['label' => $label, 'value' => (int) ($row['c'] ?? 0)];
                 }
+            }
+        }
+
+        // Dashboard v2: полный снимок состояния движка (версия, PHP, БД,
+        // миграции, кэш, модули, логи). Сервис опционален: без контейнера
+        // блок info просто отсутствует — UI рисует то, что есть (п.9).
+        $info = null;
+        if ($this->container !== null) {
+            try {
+                $info = (new EngineInfoService($this->container))->snapshot();
+            } catch (\Throwable) {
+                $info = null; // агрегатор не должен ронять панель
             }
         }
 
@@ -68,6 +80,7 @@ final class DashboardSection implements AdminSectionInterface
             'section'  => $this,
             'stats'    => $stats, // меню layout строит из shared-реестра adminNav
             'site'     => $this->siteSummary(),
+            'info'     => $info,
         ]) ?? ('<h1>Дашборд</h1><ul>'
             . implode('', array_map(
                 static fn(array $s): string => '<li>' . htmlspecialchars($s['label'], ENT_QUOTES)
