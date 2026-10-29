@@ -1,0 +1,209 @@
+/* ==========================================================================
+   engine.css — единая системная тема движка (GitHub dark, «Dimmed» палитра).
+   SCOPE_CORE: раздаётся модулем Assets из view/core/assets/ по /assets/css/engine.css.
+
+   Кто подключает:
+     • layouts/installer.phtml  — страницы установщика;
+     • layouts/base.phtml       — системные ошибки 4xx/5xx;
+     • layouts/admin.phtml      — панель администратора (вместе с admin.css);
+     • Support\FatalPage        — фатальные ошибки до инициализации ядра
+       (стили вшиты inline, но ПОВТОРЯЮТ токены этого файла — менять вместе).
+
+   Токены (меняя — синхронизируйте FatalPage.php):
+     --bg #0d1117 | --panel #161b22 | --elevated #1c2128 | --border #30363d
+     --text #e6edf3 | --muted #8b949e | --accent #1f6feb / #388bfd
+     --green #3fb950 | --red #f85149 | --purple #bc8cff | --amber #d29922
+   ========================================================================== */
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --elevated: #1c2128;
+  --inset: #010409;
+  --border: #30363d;
+  --border-muted: #21262d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #1f6feb;
+  --accent-hover: #388bfd;
+  --link: #4493f8;
+  --green: #3fb950;
+  --red: #f85149;
+  --purple: #bc8cff;
+  --amber: #d29922;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+h2 { font-size: 15px; font-weight: 600; margin: 18px 0 8px; color: var(--text); }
+.sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+
+code, pre, .loc {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+code {
+  background: var(--elevated);
+  border: 1px solid var(--border-muted);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--purple);
+}
+pre {
+  background: var(--inset);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- карточки / панели ------------------------------------------ */
+.card, .box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px 32px;
+  box-shadow: 0 12px 40px rgba(1, 4, 9, 0.5);
+}
+
+/* ---------- таблицы ----------------------------------------------------- */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-muted); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+tr:hover td { background: rgba(110, 118, 129, 0.06); }
+
+/* ---------- статусы ------------------------------------------------------ */
+.ok   { color: var(--green); }
+.fail { color: var(--red); }
+
+.errbox {
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.4);
+  border-left: 3px solid var(--red);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  color: #ffa198;
+  font-size: 13px;
+}
+.success, .notice {
+  background: rgba(63, 185, 80, 0.08);
+  border: 1px solid rgba(63, 185, 80, 0.4);
+  border-left: 3px solid var(--green);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  color: #7ee787;
+  font-size: 13px;
+}
+.warning {
+  background: rgba(210, 153, 34, 0.08);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  border-left: 3px solid var(--amber);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: #e3b341;
+}
+
+/* ---------- формы -------------------------------------------------------- */
+label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 4px; }
+label small { color: #6e7681; }
+
+input[type="text"], input[type="password"], input[type="email"],
+input[type="search"], input[type="url"], input[type="number"], select, textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  background: var(--inset);
+  color: var(--text);
+  border: 1px solid var(--border);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.3);
+}
+textarea { min-height: 260px; resize: vertical; }
+input[type="checkbox"] { accent-color: var(--accent); width: auto; }
+
+button, .btn {
+  display: inline-block;
+  margin-top: 22px;
+  padding: 8px 20px;
+  border: 1px solid rgba(240, 246, 252, 0.1);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #2ea043, #238636);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .15s ease;
+}
+button:hover, .btn:hover { background: #2ea043; text-decoration: none; }
+button:active, .btn:active { background: #238636; }
+.btn.secondary { background: var(--elevated); border-color: var(--border); color: var(--text); }
+.btn.secondary:hover { background: #262c35; }
+.btn.danger { background: #da3633; border-color: rgba(240,246,252,.1); }
+.btn.danger:hover { background: #f85149; }
+.btn.small { padding: 4px 12px; font-size: 12px; margin-top: 0; }
+
+/* ---------- инсталлятор: полоса шагов ----------------------------------- */
+.steps { display: flex; gap: 6px; margin-bottom: 22px; }
+.st {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  color: #6e7681;
+}
+.st.done   { background: rgba(63, 185, 80, 0.1);  border-color: rgba(63, 185, 80, 0.4);  color: var(--green); }
+.st.active { background: rgba(31, 111, 235, 0.15); border-color: var(--accent);           color: #79c0ff; }
+
+/* ---------- центровка (инсталлятор / ошибки) ----------------------------- */
+.center-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.center-page .card { max-width: 760px; width: 100%; }
+.center-narrow .card { max-width: 480px; width: 100%; }
+
+.code-big { font-size: 3rem; font-weight: 700; color: #79c0ff; margin: 0; font-family: ui-monospace, Consolas, monospace; }
+.footer-hint { margin-top: 18px; font-size: 11px; color: #6e7681; }
+
+/* ---------- скроллбары (WebKit) ------------------------------------------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+::selection { background: rgba(56, 139, 253, 0.4); }

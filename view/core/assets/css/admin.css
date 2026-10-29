@@ -1,0 +1,21 @@
+/* Системная статика админ-панели (SCOPE_CORE, каскад site->theme->core).
+   Базовые токены/каркас берутся из engine.css (единая тема движка);
+   здесь — только раскладка панели (sidebar + main) и специфика таблиц. */
+.wrap { display: flex; min-height: 100vh; }
+nav { width: 230px; background: var(--panel); border-right: 1px solid var(--border);
+  padding: 18px 12px; flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+nav .brand { font-size: 14px; font-weight: 700; color: #79c0ff; padding: 6px 10px 16px; }
+nav a { display: block; padding: 9px 12px; border-radius: 8px; color: var(--muted);
+  text-decoration: none; font-size: 14px; margin-bottom: 2px; transition: background .12s ease, color .12s ease; }
+nav a:hover { background: var(--elevated); color: var(--text); text-decoration: none; }
+nav a.active { background: rgba(56, 139, 253, 0.15); color: #79c0ff; box-shadow: inset 2px 0 0 var(--accent-hover); }
+main { flex: 1; padding: 26px 32px; max-width: 1100px; }
+
+.badge { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 2em;
+  background: rgba(63, 185, 80, 0.15); border: 1px solid rgba(63, 185, 80, 0.4); color: var(--green); }
+
+.cards { display: flex; gap: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px 20px; min-width: 160px; box-shadow: none; }
+.card b { font-size: 24px; color: #79c0ff; display: block; }
+.card span { font-size: 12px; color: var(--muted); }

@@ -1,0 +1,7 @@
+@extends('layouts/installer')
+@section('title') Ошибка установки @endsection
+@section('content')
+<h1>Ошибка установки</h1>
+<div class="errbox">&#10060; {{ $reason }}</div>
+<form method="get" action="/install"><button>Попробовать снова</button></form>
+@endsection
