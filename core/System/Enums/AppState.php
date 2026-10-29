@@ -69,20 +69,22 @@ enum AppState: string
         $flags = self::flagNames();
         unset($flags[self::NotInstalled->name]); // это «нет маркеров», проверяется последним
 
-        // ИСКЛЮЧЕНИЕ из приоритета (инвариант I1, KernelInstallGuardTest):
-        // живой '.installed' важнее любого переходного флага. install() держит
-        // .installing всё время выполнения; если бы приоритет был слепым,
-        // повторный вход конвейера видел бы Installing вместо Running и
-        // блокировал собственный запрос установщика (регрессия 503). Переходные
-        // флаги без .installed — честная установка/обслуживание (детект ниже).
-        if (is_file(self::NotInstalled->marker($storagePath))) {
-            return self::Running;
-        }
-
+        // Инвариант I1 (KernelInstallGuardTest): переходные флаги
+        // (Installing/Upgrading/Maintenance/Error) имеют ВЫСШИЙ приоритет над
+        // '.installed'. install() держит '.installing' всё время выполнения,
+        // поэтому «зависший» '.installing' при живом '.installed' читается как
+        // идущая установка — именно так guard ядра отличает живой процесс от
+        // странных повторов и не даёт рекурсивной блокировке (регрессия 503)
+        // вернуться: блокировка снимается методом POST, а не приоритетом флагов.
         foreach ($flags as $name => $markerFile) {
             if (is_file($storagePath . '/' . $markerFile)) {
                 return self::fromName($name);
             }
+        }
+
+        // Маркеров состояний нет: '.installed' различает Running и NotInstalled.
+        if (is_file(self::NotInstalled->marker($storagePath))) {
+            return self::Running;
         }
 
         return self::NotInstalled;

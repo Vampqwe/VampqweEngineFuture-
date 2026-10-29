@@ -92,21 +92,23 @@ final class KernelInstallGuardTest extends TestCase
         return $stateValue === 'installing' && $method === 'POST';
     }
 
-    public function testDetectPrefersInstalledOverStaleInstallingFlag(): void
+    public function testDetectPrefersTransientFlagOverInstalledFlag(): void
     {
         [$dir, $fs] = $this->makeStorage();
         try {
-            // Сценарий после успешной установки: .installed есть, .installing
-            // мог остаться от зависшего процесса — детект обязан отдать Running.
+            // Инвариант I1 (обновлённая семантика): переходный флаг важнее
+            // '.installed'. install() больше НЕ ставит '.installing', поэтому
+            // живой '.installing' при '.installed' возможен только от зависшей
+            // установки СТАРЫХ версий движка — детект честно сообщает об этом.
             $fs->createFile($dir . '/.installed', '1');
             $fs->createFile($dir . '/.installing', '1');
-            self::assertSame('running', \App\Core\System\Enums\AppState::detect($dir)->value,
-                'I1: .installed важнее висящего .installing (честное «уже установлен»).');
-
-            // Обратный сценарий: только .installing — идёт установка.
-            $fs->delete($dir . '/.installed');
             self::assertSame('installing', \App\Core\System\Enums\AppState::detect($dir)->value,
-                'I1: без .installed флаг Installing детектится корректно.');
+                'I1: висящий .installing читается как идущая (зависшая) установка.');
+
+            // Без переходных флагов '.installed' различает Running/NotInstalled.
+            $fs->delete($dir . '/.installing');
+            self::assertSame('running', \App\Core\System\Enums\AppState::detect($dir)->value,
+                'I1: без переходных маркеров .installed даёт Running.');
         } finally {
             $this->rrmdir(dirname($dir));
         }
@@ -300,7 +302,7 @@ final class KernelInstallGuardTest extends TestCase
             ]));
             // Installer-модуль в контейнере нет -> installerResponse вернёт свой
             // 503 «Модуль Installer недоступен», НО НЕ страницу «Идет установка».
-            self::assertFalse(str_contains($response->body, 'Идет установка'),
+            self::assertFalse(str_contains($response->body(), 'Идет установка'),
                 'I3: в NotInstalled запрос никогда не блокируется Installing-страницей.');
         } finally {
             $this->rrmdir(dirname($dir));
