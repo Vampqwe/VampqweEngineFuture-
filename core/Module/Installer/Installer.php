@@ -93,8 +93,10 @@ final class Installer implements InstallerInterface, InstallerPageInterface
      */
     public function install(array $options = []): array|bool
     {
-        $flagFile = $this->flagPath(AppState::Installing);
-        $this->fs->createFile($flagFile);
+        // Флаг Installing НЕ ставится: живой '.installing' при установленном
+        // '.installed' читался бы AppState::detect() как идущая установка и
+        // перехватывал запросы ядром (регрессия 503). Прогресс установки
+        // определяется по артефактам (.env, .installed), а не по флагу.
         $summary = [];
 
         try {
@@ -119,8 +121,13 @@ final class Installer implements InstallerInterface, InstallerPageInterface
                 SuperAdmin::PASSWORD_HASH_ENV => $adminHash,
             ]);
 
-            // Флаг готовности — AppState::Running определяется по нему
-            $this->fs->createFile($this->flagPath(AppState::Running));
+            // Флаг готовности ('.installed') — AppState::Running определяется по
+            // нему. Ставится СРАЗУ после записи .env, до Database/Schema-шагов:
+            // это часть защиты от рекурсивной блокировки Installing (Kernel):
+            // повторный вход в конвейер видит уже не NotInstalled и корректно
+            // сообщает «уже установлен», а не 503. При провале схемы ниже флаг
+            // снимается (состояние остаётся честным).
+            $this->fs->createFile($this->flagPath(AppState::Running), '1');
 
             // Database-шаг: создаём БД (если активный драйвер включён и доступен)
             // и прогоняем схему database/db.sql. Недоступная СУБД НЕ валит установку —
@@ -147,14 +154,16 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             ]);
 
             return false;
-        } finally {
-            $this->fs->delete($flagFile);
         }
     }
 
     public function isInstalling(): bool
     {
-        return $this->fs->isFile($this->flagPath(AppState::Installing));
+        // Флаг Installing больше не ставится (см. install()): «установка идёт»
+        // физически невозможно отличить от «зависшей установки» без side-channel,
+        // поэтому честный ответ — false; прогресс читается по артефактам
+        // (.env / .installed), состояние движка определяет AppState::detect().
+        return false;
     }
 
     public function isInstalled(): bool

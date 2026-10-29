@@ -155,7 +155,9 @@ final class HttpServer
         }
         file_put_contents($this->dir . '/.env', implode("\n", $lines) . "\n");
 
-        mkdir($this->dir . '/storage', 0775, true);
+        if (!is_dir($this->dir . '/storage')) {
+            mkdir($this->dir . '/storage', 0775, true);
+        }
         if ($installed) {
             file_put_contents($this->dir . '/storage/.installed', '1');
         }
