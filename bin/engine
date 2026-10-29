@@ -1,0 +1,244 @@
+<?php
+
+declare(strict_types=1);
+
+/**
+ * CLI-точка входа движка: php bin/engine doctor
+ *
+ * Минимальная реализация самодиагностики: проверяет окружение,
+ * права на storage/, загрузку ядра и состояние приложения.
+ */
+
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit("Только для CLI\n");
+}
+
+define('BASE_PATH', dirname(__DIR__));
+
+require_once BASE_PATH . '/vendor/autoload.php';
+
+use App\Core\System\App;
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\FileSystem\Contracts\FileSystemInterface;
+use App\Core\Module\Logger\Contracts\LoggerInterface;
+use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
+
+$command = $argv[1] ?? 'doctor';
+
+$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status', 'sites', 'site:add', 'test', 'lint-rules'];
+if (!in_array($command, $allowed, true)) {
+    echo "Неизвестная команда: {$command}\n"
+        . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
+        . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status"
+        . " | sites | site:add <домен> <тема> [заголовок] | test | lint-rules\n";
+    exit(1);
+}
+
+// Тесты — без инициализации ядра: собственный фреймворк (п. «тестовый фреймворк»).
+if ($command === 'test') {
+    require BASE_PATH . '/tests/run.php';
+    exit(0); // run.php сам вызывает exit с нужным кодом
+}
+
+// Статический контроль архитектуры/стиля (п.5 плана): Constitution-правила как код.
+if ($command === 'lint-rules') {
+    $linter = new \App\Core\System\Support\ArchitectureLinter(BASE_PATH);
+    $violations = $linter->run();
+    if ($violations === []) {
+        echo "🧹 lint-rules: нарушений Конституции и стиля не найдено ✅\n";
+        exit(0);
+    }
+    foreach ($violations as $v) {
+        echo "❌ {$v}\n";
+    }
+    echo 'Найдено нарушений: ' . count($violations) . "\n";
+    exit(1);
+}
+
+echo "🩺 VampqweEngineFuture — самодиагностика\n";
+echo str_repeat('-', 50) . "\n";
+
+// Общие для всех команд: инициализация контейнера ядра.
+$ok = true;
+
+function check(string $label, bool $pass, string $detail = ''): void
+{
+    global $ok;
+    $ok = $ok && $pass;
+    printf("%s %-28s %s\n", $pass ? '✅' : '❌', $label, $detail);
+}
+
+check('PHP >= 8.1', version_compare(PHP_VERSION, '8.1.0', '>='), PHP_VERSION);
+check('autoload существует', is_file(BASE_PATH . '/vendor/autoload.php'));
+check('.env присутствует', is_file(BASE_PATH . '/.env'), '(иначе дефолты)');
+check('Расширение PDO', extension_loaded('pdo'), implode(',', \PDO::getAvailableDrivers()) ?: 'нет драйверов');
+// Пути проверяем НЕ хардкодом, а через единую точку правды — Support\Paths.
+$paths = new \App\Core\System\Support\Paths(BASE_PATH);
+foreach ($paths->all() as $key => $abs) {
+    if (in_array($key, ['storage', 'logs'], true)) {
+        @mkdir($abs, 0755, true);
+        check($key . '/ записи', is_writable($abs), $abs);
+    }
+}
+
+try {
+    $app = new App();
+
+    $ref  = new ReflectionClass($app);
+    $prop = $ref->getProperty('container');
+    $prop->setAccessible(true);
+    $c = $prop->getValue($app);
+
+    // --- Команды модулей Cache, Queue и Template ---
+    if ($command === 'template:clear') {
+        /** @var \App\Core\Module\Template\Contracts\TemplateInterface $views */
+        $views = $c->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
+        $n = $views->clearCache();
+        check('Template: кэш компиляции очищен (' . $n . ' файлов)', true);
+        echo str_repeat('-', 50) . "\n";
+        echo "ВЕРДИКТ: шаблоны будут перекомпилированы при следующем рендере 🎉\n";
+        exit(0);
+    }
+
+    if ($command === 'cache:clear') {
+        /** @var \App\Core\Module\Cache\Contracts\CacheInterface $cache */
+        $cache = $c->get(\App\Core\Module\Cache\Contracts\CacheInterface::class);
+        check('Cache: очистка', $cache->flush());
+        echo str_repeat('-', 50) . "\n";
+        echo $ok ? "ВЕРДИКТ: кэш очищен 🎉\n" : "ВЕРДИКТ: не удалось очистить кэш 👆\n";
+        exit($ok ? 0 : 1);
+    }
+
+    if ($command === 'queue:status') {
+        /** @var \App\Core\Module\Queue\Contracts\QueueInterface $queue */
+        $queue = $c->get(\App\Core\Module\Queue\Contracts\QueueInterface::class);
+        echo "📮 Очередь: драйвер '" . $queue->driver() . "', готовых задач: " . $queue->size() . "\n";
+        exit(0);
+    }
+
+    if ($command === 'queue:work') {
+        /** @var \App\Core\Module\Queue\QueueManager $queue */
+        $queue = $c->get(\App\Core\Module\Queue\Contracts\QueueInterface::class);
+        $opts  = array_slice($argv, 2);
+        $maxJobs = null;
+        $seconds = 60;
+        foreach ($opts as $o) {
+            if ($o === '--once') { $maxJobs = 1; }
+            elseif (preg_match('/^--max=(\d+)$/', $o, $m)) { $maxJobs = (int) $m[1]; }
+            elseif (preg_match('/^--seconds=(\d+)$/', $o, $m)) { $seconds = (int) $m[1]; }
+        }
+        $worker = new \App\Core\Module\Queue\Internal\Worker(
+            $queue,
+            $c->has(LoggerInterface::class) ? $c->get(LoggerInterface::class) : null,
+            $c->has(\App\Core\Module\Hook\Contracts\HookInterface::class)
+                ? $c->get(\App\Core\Module\Hook\Contracts\HookInterface::class) : null,
+        );
+        echo "⚙️  Worker запущен (драйвер: " . $queue->driver() . ", лимит: "
+            . ($maxJobs === null ? 'пока есть задачи' : $maxJobs . ' задач') . ", ${seconds}s)\n";
+        $stats = $worker->run($maxJobs, $seconds);
+        echo "Готово: выполнено {$stats['processed']}, retry {$stats['retried']}, "
+            . "провалено {$stats['failed']}, пауз {$stats['idle']}\n";
+        exit(0);
+    }
+
+    // --- Команды модуля Migration (версионирование схемы БД) ---
+    if (!in_array($command, ['doctor', 'cache:clear', 'queue:work', 'queue:status'], true)) {
+        /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $migrator */
+        $migrator = $c->get(\App\Core\Module\Migration\Contracts\MigratorInterface::class);
+        $arg = $argv[2] ?? null;
+
+        switch ($command) {
+            case 'migrate':
+                $done = $migrator->migrate($arg);
+                if ($done === []) {
+                    echo "✅ Миграций для применения нет. Статус: "
+                        . json_encode($migrator->status(), JSON_UNESCAPED_UNICODE) . "\n";
+                } else {
+                    foreach ($done as $id) {
+                        echo "✅ Применена миграция: {$id}\n";
+                    }
+                }
+                exit(0);
+
+            case 'migration:rollback':
+                $rolled = $migrator->rollback($arg);
+                echo $rolled === null
+                    ? "➖ Откатывать нечего (реестр пуст).\n"
+                    : "↩️  Откачена миграция: {$rolled}\n";
+                exit(0);
+
+            case 'migration:make':
+                if (!is_string($arg) || $arg === '') {
+                    echo "Использование: php bin/engine migration:make <имя_миграции>\n";
+                    exit(1);
+                }
+                echo "📝 Создана заготовка: " . $migrator->make($arg) . "\n";
+                exit(0);
+        }
+    }
+
+    // --- Команды модуля Theme (мультисайт: реестр доменов и тем) ---
+    if ($command === 'sites') {
+        /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+        $themes = $c->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+        $sites  = $themes->sites();
+        if ($sites === []) {
+            echo "🌐 Реестр сайтов пуст (БД недоступна или таблица engine_sites не создана — выполните 'php bin/engine migrate').\n";
+            exit(0);
+        }
+        echo "🌐 Сайты мультисайта (домен -> тема view/app/):\n";
+        foreach ($sites as $site) {
+            $mark = $themes->exists((string) $site['theme']) ? '✅' : '⚠️';
+            echo sprintf("  %s %-24s -> %-16s %s\n", $mark, $site['domain'], $site['theme'], $site['title'] ?? '');
+        }
+        echo "Темы на диске: " . implode(', ', $themes->available()) . "\n";
+        exit(0);
+    }
+
+    if ($command === 'site:add') {
+        /** @var \App\Core\Module\Theme\Contracts\ThemeInterface $themes */
+        $themes = $c->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
+        $domain = (string) ($argv[2] ?? '');
+        $theme  = (string) ($argv[3] ?? '');
+        $title  = (string) ($argv[4] ?? '');
+        if ($domain === '' || $theme === '') {
+            echo "Использование: php bin/engine site:add <домен> <тема> [заголовок]\n";
+            exit(1);
+        }
+        if (!$themes->registerSite($domain, $theme, $title)) {
+            echo "❌ Не удалось зарегистрировать сайт (БД недоступна или не установлена — 'php bin/engine migrate').\n";
+            exit(1);
+        }
+        echo "✅ Сайт '{$domain}' привязан к теме '{$theme}'.\n";
+        echo $themes->exists($theme)
+            ? "   Тема уже существует в view/app/.\n"
+            : "   Папки темы ещё нет — она будет автоматически клонирована из view/app/engineStart-starter при первом запросе к домену.\n";
+        exit(0);
+    }
+
+    check('Config загружен', $c->get(ConfigRepositoryInterface::class)->has('app.name'));
+    check('FileSystem сервис', $c->has(FileSystemInterface::class));
+    check('Logger сервис', $c->has(LoggerInterface::class));
+    check('ExceptionHandler сервис', $c->has(ExceptionHandlerInterface::class));
+
+    $installed = file_exists(BASE_PATH . '/storage/.installed');
+    check('Состояние', true, $installed ? 'Running (установлен)' : 'NotInstalled');
+
+    // Полная самодиагностика через модуль Doctor (п.9 Конституции):
+    // наличие всех контрактов ядра и сервисных модулей.
+    $doctorClass = \App\Core\Module\Doctor\Contracts\DoctorInterface::class;
+    if ($c->has($doctorClass)) {
+        /** @var \App\Core\Module\Doctor\Contracts\DoctorInterface $doctor */
+        $doctor = $c->get($doctorClass);
+        foreach ($doctor->check() as $item) {
+            check('Модуль: ' . $item['name'], $item['ok'], $item['message']);
+        }
+    }
+} catch (\Throwable $e) {
+    check('Инициализация ядра', false, $e->getMessage());
+}
+
+echo str_repeat('-', 50) . "\n";
+echo $ok ? "ВЕРДИКТ: всё в порядке 🎉\n" : "ВЕРДИКТ: есть проблемы 👆\n";
+exit($ok ? 0 : 1);

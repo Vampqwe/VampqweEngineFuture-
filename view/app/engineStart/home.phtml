@@ -1,0 +1,73 @@
+@extends('layouts/site')
+@section('title') {{ $appName }} — engineStart @endsection
+@section('content')
+    <h1>🚀 {{ $appName }}</h1>
+
+    @if($dbOk)
+        <p>Движок запущен и работает. Debug-режим: <b>{{ $debugLabel }}</b>. Это страница <b>engineStart</b> — стартовый сайт движка и одновременно краткий путеводитель по нему.</p>
+    @else
+        <p>⚠️ Ядро работает, но база данных «{{ $dbDriver }}» недоступна. Проверьте запуск СУБД и настройки в <code>.env</code>.</p>
+        @if($debug && $dbError !== null)
+            <pre>{{ $dbError }}</pre>
+        @endif
+    @endif
+
+    <h2>📍 Куда смотреть</h2>
+    <ul>
+        <li><a href="/install">/install</a> — мастер установки (повторный запуск позволяет сбросить пароль администратора).</li>
+        <li><a href="/admin">/admin</a> — панель администратора (логин <code>SuperAdmin</code>, пароль из мастера установки).</li>
+        <li><a href="/system/health">/system/health</a> — JSON-самодиагностика ядра.</li>
+    </ul>
+
+    <h2>🧱 Как устроен ваш сайт</h2>
+    <p>Один запуск движка = один сайт. Его домен задаётся в <code>.env</code> параметром <code>BASE_URL_SITE</code>. Всё пользовательское живёт в трёх местах:</p>
+    <table border="1" cellpadding="6" cellspacing="0">
+        <tr><th>Что</th><th>Где</th><th>Как подключается</th></tr>
+        <tr><td>Шаблоны страниц</td><td><code>view/app/engineStart/</code></td><td><code>$views-&gt;render('имя', $data)</code>; layout — <code>layouts/site.phtml</code></td></tr>
+        <tr><td>CSS / JS / картинки</td><td><code>view/app/engineStart/assets/</code></td><td>модуль Assets, каскад <code>сайт → тема → ядро</code>; теги вставляет <code>{!! $assetsStyles !!}</code> в layout</td></tr>
+        <tr><td>Контроллеры, модели, миграции</td><td><code>app/modules/&lt;Имя&gt;/</code></td><td>провайдер модуля регистрирует сервисы; маршрут — через хук реестра роутеров</td></tr>
+    </table>
+
+    <h2>✨ Рецепт 1: новая страница</h2>
+    <ol>
+        <li>Создайте шаблон <code>view/app/engineStart/pages/hello.phtml</code>:</li>
+<pre>@extends('layouts/site')
+@section('title') Привет @endsection
+@section('content')
+    &lt;h1&gt;Привет, {{ '{{ $name }}' }}!&lt;/h1&gt;
+@endsection</pre>
+        <li>Модуль Pages отдаёт страницы по адресу <code>/{slug}</code> — создайте запись страницы в админке (<code>/admin</code> → Pages), либо сделайте свой контроллер (рецепт 2).</li>
+    </ol>
+
+    <h2>🧩 Рецепт 2: свой модуль со своим маршрутом и своей БД</h2>
+    <p>Структура модуля (пример <code>app/modules/Blog/</code>):</p>
+<pre>app/modules/Blog/
+├── Contracts/BlogServiceInterface.php   // публичный контракт (п.2 Конституции)
+├── Internal/                            // внутренняя кухня — наружу не видна
+├── Providers/BlogServiceProvider.php    // регистрация сервисов в контейнере
+├── BlogController.php                   // HTTP-слой
+└── Migrations/                          // СВОЯ структура БД этого модуля</pre>
+    <ol>
+        <li><b>Контракт</b> — интерфейс сервиса. Всё остальное мира не касается, только он.</li>
+        <li><b>Провайдер</b> — возвращает фабрики; контейнер строит сервисы лениво, зависимости — только через конструктор.</li>
+        <li><b>Маршрут</b> — регистрируйте дорогу расширением, а не правкой ядра (п.5: ядро расширяется хуками и провайдерами).</li>
+        <li><b>Своя БД</b> — файлы миграций в <code>Migrations/</code> модуля, применяются <code>php bin/engine migrate</code>. Таблицы называйте с префиксом модуля (<code>blog_posts</code>); к схемам ядра не прикасайтесь.</li>
+    </ol>
+
+    <h2>🎨 Рецепт 3: своя тема оформления</h2>
+    <ol>
+        <li>Новый сайт получает копию стартера автоматически (<code>view/app/engineStart-starter/</code> клонируется при первом запросе к новому домену), либо скопируйте вручную в <code>view/app/myshop/</code>.</li>
+        <li>Привяжите домен к теме: <code>php bin/engine site:add myshop.test myshop</code>.</li>
+        <li>Отсутствующие шаблоны тема наследует из <code>engineStart</code> (fallback) — переопределяйте только то, что меняете.</li>
+    </ol>
+
+    <h2>📐 Правила, которые стоит соблюдать</h2>
+    <ul>
+        <li>Каждый PHP-файл начинается с <code>declare(strict_types=1)</code>.</li>
+        <li>Наружу модуль отдаёт только <code>Contracts/</code>; всё в <code>Internal/</code> приватно (проверяется <code>php bin/engine lint-rules</code>).</li>
+        <li>Зависимости — только через конструктор и контракты, никаких глобалов и прямых <code>new PDO</code>.</li>
+        <li>Перед коммитом: <code>php bin/engine lint-rules</code> и <code>php bin/engine test</code> должны быть зелёными.</li>
+    </ul>
+
+    <p><small>Эта страница — файл <code>view/app/engineStart/home.phtml</code>. Правьте её смело: это ваш сайт.</small></p>
+@endsection

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ $title ?? $appName }}</title>
+{{-- Единая системная тема движка (GitHub dark): engine.css из view/core/assets/
+     через реестр Assets (SCOPE_CORE). Fallback — прямая ссылка, если модуль
+     Assets недоступен (п.9: страница ошибки не должна падать из-за статики). --}}
+@if(($assetsStyles ?? '') !== '')
+{!! $assetsStyles !!}
+@else
+<link rel="stylesheet" href="/assets/css/engine.css">
+@endif
+</head>
+<body class="center-page center-narrow">
+    <div class="card">
+        @yield('content')
+    </div>
+</body>
+</html>
