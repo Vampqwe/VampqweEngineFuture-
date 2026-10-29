@@ -94,7 +94,9 @@ final class Installer implements InstallerInterface, InstallerPageInterface
     public function install(array $options = []): array|bool
     {
         $flagFile = $this->flagPath(AppState::Installing);
-        $this->fs->createFile($flagFile);
+        // Контракт FileSystemInterface::createFile требует явный аргумент $content (R11 —
+        // дефолтов в контрактах нет): флаг-файл создаётся пустой строкой осознанно.
+        $this->fs->createFile($flagFile, '');
         $summary = [];
 
         try {
@@ -129,7 +131,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             }
 
             // Флаг готовности — AppState::Running определяется по нему
-            $this->fs->createFile($this->flagPath(AppState::Running));
+            $this->fs->createFile($this->flagPath(AppState::Running), '');
 
             // Database-шаг: создаём БД (если активный драйвер включён и доступен)
             // и прогоняем схему database/db.sql. Недоступная СУБД НЕ валит установку —
