@@ -110,6 +110,19 @@ final class AdminController implements AdminPanelInterface
         // 2) Пустой путь — дашборд; неизвестный раздел — 404 панели.
         $sections = $this->sections();
 
+        // Единая системная тема: базовый engine.css для панели подключается
+        // ХУКОМ (п.4 Конституции — расширение без правки ядра): слушатель
+        // регистрирует стиль ДО dispatch('admin.assets.register') ниже,
+        // который публикует теги в шаблон. Сторонние модули дописывают свои
+        // стили панели тем же событием. Идемпотентно по handle (registerStyle).
+        if ($this->hooks !== null && $this->container->has(\App\Core\Module\Assets\Contracts\AssetsInterface::class)) {
+            $this->hooks->on('admin.assets.register', function (): void {
+                $assets = $this->container->get(\App\Core\Module\Assets\Contracts\AssetsInterface::class);
+                assert($assets instanceof \App\Core\Module\Assets\Contracts\AssetsInterface);
+                $assets->registerStyle('engine', 'css/engine.css', [], \App\Core\Module\Assets\Contracts\AssetsInterface::SCOPE_CORE);
+            });
+        }
+
         // Контекст шаблонов панели (SCOPE_CORE, view/core/admin/): меню
         // строится ИЗ реестра разделов (п.2), активный пункт — по пути
         // запроса; токен — для форм (CSRF проверяет глобальный middleware ядра).
@@ -125,10 +138,24 @@ final class AdminController implements AdminPanelInterface
             if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
                 $tpl0 = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);
                 assert($tpl0 instanceof \App\Core\Module\Template\Contracts\TemplateInterface);
+                // ВАЖНО: публикация тегов — ПОСЛЕ регистрации всех стилей/скриптов
+                // (см. хук admin.assets.register ниже). styles()/scripts() снимали
+                // слепок реестра в момент вызова: engine.css, зарегистрированный
+                // хуком позже, не попадал в <head>, и страница входа оставалась
+                // без токенов темы (голый HTML). Теперь слепки берутся здесь же,
+                // где уже гарантированно зарегистрированы admin.*; хук-дописчики
+                // до сих пор могут влиять через engine.assets.styles/scripts.
                 $tpl0->share('assetsStyles', $assets->styles());
                 $tpl0->share('assetsScripts', $assets->scripts());
             }
         }
+
+        // Единая системная тема: базовый engine.css для панели подключается
+        // ХУКОМ, а не правкой ядра (п.4): сторонние модули дописывают свои
+        // стили той же точкой расширения. AdminController резолвит Assets
+        // напрямую, поэтому регистрация через событие — совместима с любой
+        // очередностью вызовов (registerStyle идемпотентен по handle).
+        $this->hooks?->dispatch('admin.assets.register');
 
         if ($this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)) {
             $tpl = $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class);

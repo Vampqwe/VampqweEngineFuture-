@@ -42,6 +42,19 @@ final class CsrfProtect implements MiddlewareInterface
 
         $token = $request->header('X-CSRF-Token') ?? ($request->post['_csrf'] ?? null);
         if (!$session->validateCsrf(is_string($token) ? $token : null)) {
+            // Диагностика для отладки 419 (без утечки секретов — только длины):
+            // длина присланного токена и наличие хранимого в сессии. Если
+            // stored_len=0 — сессяная запись потеряна (кука/стор), если длины
+            // есть, но не равны — форма отрендерена с другим токеном.
+            $stored   = $session->get('_csrf');
+            $sentLen  = is_string($token) ? strlen($token) : 0;
+            $storeLen = is_string($stored) ? strlen($stored) : 0;
+            $this->bridge->log(
+                'warning',
+                "CSRF validation failed: path={$request->path} method={$request->method} sent_len={$sentLen} stored_len={$storeLen}",
+                ['channel' => 'Security']
+            );
+
             return new Response($this->bridge->errorPage(419), 419);
         }
 

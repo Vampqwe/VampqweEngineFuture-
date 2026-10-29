@@ -240,8 +240,16 @@ class Kernel
         }
 
         try {
+            // ВАЖНО (источник 419 после логина/ротации): захватываем состояние
+            // куки ДО save(). Ротация id (start/startPreservingCsrf) меняет id,
+            // и после неё clientHasValidCookie()==false — кука браузера подписана
+            // СТАРЫМ id. Условие «дай куку, только если её нет» теряло новый id:
+            // браузер продолжал слать старую куку -> следующая загрузка сессии
+            // пустая (_csrf отсутствует) -> validateCsrf всегда false -> 419.
+            // Теперь Set-Cookie отдаётся и когда id НЕ совпадает с принятым.
+            $needsCookie = !$session->clientHasValidCookie();
             $session->save();
-            if (!$session->clientHasValidCookie() && $session->id() !== '') {
+            if ($needsCookie && $session->id() !== '') {
                 $response = $response->withCookie($session->sessionCookieHeader());
             }
         } catch (\Throwable $e) {
