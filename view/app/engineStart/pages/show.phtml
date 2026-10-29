@@ -1,0 +1,9 @@
+@extends('layouts/site')
+@section('title') {{ $page['title'] }} @endsection
+@section('content')
+    <article>
+        <h1>{{ $page['title'] }}</h1>
+        <p class="meta">Опубликовано: {{ $page['published_at'] ?? '—' }} · Просмотров: {{ (int) ($page['views_count'] ?? 0) }}</p>
+        {!! $page['content'] !!}
+    </article>
+@endsection

@@ -1,0 +1,12 @@
+@extends('layouts/site')
+@section('title') {{ $site['title'] !== '' ? $site['title'] : $appName }} @endsection
+@section('content')
+    <h1>{{ $site['title'] !== '' ? $site['title'] : 'Новый сайт мультисайта' }}</h1>
+    <p>Домен: {{ $site['domain'] ?? '—' }} · Тема: {{ $site['theme'] ?? '—' }}</p>
+    @if($dbOk)
+        <p>Движок работает. Это стартовый шаблон темы — отредактируйте <code>home.phtml</code> своей папки.</p>
+        <p>📖 Полный гайд по движку (страницы, модули, темы, правила) живёт на сайте <b>engineStart</b>: файл <code>view/app/engineStart/home.phtml</code>.</p>
+    @else
+        <p>⚠️ База данных «{{ $dbDriver }}» недоступна.</p>
+    @endif
+@endsection

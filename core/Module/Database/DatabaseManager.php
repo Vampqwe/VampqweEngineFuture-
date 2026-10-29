@@ -1,0 +1,269 @@
+<?php
+declare(strict_types=1);
+
+namespace App\Core\Module\Database;
+
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\Database\Contracts\DatabaseInterface;
+use App\Core\Module\Database\Internal\Connectors\PdoConnector;
+use App\Core\Module\Database\Internal\QueryBuilders\QueryBuilder;
+use App\Core\Module\Database\Internal\Schema\SqlFileRunner;
+use App\Core\System\Container\Contracts\ContainerInterface;
+use PDO;
+use RuntimeException;
+use Throwable;
+
+/**
+ * Фасад модуля Database (менеджер соединений поверх PDO).
+ *
+ * Зависимости (только через контракты/ключи контейнера, п.3/п.7):
+ *   ConfigRepositoryInterface — database.driver и credentials;
+ *   LoggerInterface (канал 'Database') — ошибки соединений;
+ *   'storage_path' — для sqlite-файла (единая точка правды Paths).
+ *
+ * Соединение ленивое: PDO создаётся при первом запросе — движок стартует,
+ * даже если СУБД недоступна (Doctor честно сообщит ping=false).
+ */
+final class DatabaseManager implements DatabaseInterface
+{
+    private ?PDO $pdo = null;
+
+    public function __construct(
+        private readonly ContainerInterface $container,
+        private readonly ConfigRepositoryInterface $config,
+    ) {
+    }
+
+    // ==================== DatabaseInterface ====================
+
+    public function beginTransaction(): void
+    {
+        if ($this->pdo()->inTransaction()) {
+            throw new RuntimeException('Модуль [Database]: транзакция уже открыта.');
+        }
+        $this->pdo()->beginTransaction();
+    }
+
+    public function commit(): void
+    {
+        $this->pdo()->commit();
+    }
+
+    public function rollBack(): void
+    {
+        $this->pdo()->rollBack();
+    }
+
+    /** @param array<int|string,mixed> $bindings */
+    public function run(string $sql, array $bindings = []): int
+    {
+        $stmt = $this->pdo()->prepare($sql);
+        $stmt->execute($bindings);
+
+        return $stmt->rowCount();
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function select(string $sql, array $bindings = []): array
+    {
+        $stmt = $this->pdo()->prepare($sql);
+        $stmt->execute($bindings);
+
+        /** @var list<array<string,mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function selectOne(string $sql, array $bindings = []): ?array
+    {
+        $stmt = $this->pdo()->prepare($sql);
+        $stmt->execute($bindings);
+        $row  = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $row;
+    }
+
+    public function query(string $table): object
+    {
+        return new QueryBuilder($this, $table);
+    }
+
+    /**
+     * Идентификатор последней вставленной строки (PDO::lastInsertId).
+     * Реализация DatabaseInterface::lastInsertId() — нужна репозиториям
+     * модулей-потребителей (Pages) после INSERT.
+     */
+    public function lastInsertId(): int
+    {
+        return (int) $this->pdo()->lastInsertId();
+    }
+
+    /**
+     * Прогон SQL-дампа (например database/db.sql) через активное PDO-соединение.
+     * Реализация DatabaseInterface::migrate(). Идемпотентность обеспечивает вызывающий
+     * (Installer проверяет наличие таблиц перед прогоном).
+     *
+     * @return int количество выполненных операторов
+     */
+    public function migrate(string $sql, bool $skipExisting): int
+    {
+        // Дампы из phpMyAdmin содержат MySQL-директивы (SET SQL_MODE и т.п.) —
+        // исполнитель пропускает их для не-mysql драйверов (переносимость схемы).
+        // В режиме skipExisting уже созданные таблицы досоздавать не пытаемся:
+        // повторная установка/частичная схема не должна падать на DDL-конфликте.
+        $existing = $skipExisting ? $this->existingTables() : [];
+
+        return count((new SqlFileRunner())->run($this->pdo(), $sql, $this->driver(), $existing));
+    }
+
+    /**
+     * Имена таблиц, уже присутствующих в активной БД (для идемпотентного
+     * пропуска CREATE TABLE). Диалект-специфичные каталоги; ошибки чтения
+     * каталога трактуются как «таблиц нет» (честный прогон с обычным fail).
+     *
+     * @return array<string,true> lowercase => есть
+     */
+    private function existingTables(): array
+    {
+        $sql = match ($this->driver()) {
+            'mysql'  => 'SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()',
+            'pgsql'  => 'SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()',
+            'sqlite' => "SELECT name FROM sqlite_master WHERE type = 'table'",
+            default  => null,
+        };
+        if ($sql === null) {
+            return [];
+        }
+
+        try {
+            $rows = $this->pdo()->query($sql)->fetchAll(\PDO::FETCH_NUM);
+        } catch (\PDOException) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[strtolower((string) $row[0])] = true;
+        }
+
+        return $out;
+    }
+
+    /** Существует ли таблица в активной БД (information_schema/sqlite_master). */
+    public function tableExists(string $table): bool
+    {
+        if (!preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            throw new RuntimeException("Модуль [Database]: недопустимое имя таблицы '{$table}'.");
+        }
+
+        // Примечание: раньше здесь был ранний выход «файл 0 байт → таблиц нет».
+        // Он устарел: SQLite при первом же запросе сам инициализирует пустой
+        // файл, а резолв пути ниже теперь симметричен PdoConnector (единый
+        // storage_path), поэтому честная проверка через sqlite_master надёжна.
+        // ВАЖНО: приведение идёт к полю 'c' (счётчик), а НЕ к массиву строки:
+        // (bool)['c'=>0] === true — именно эта ошибка давала ложное «таблица
+        // существует» в пустой базе и ломала реестр миграций.
+        $row = match ($this->driver()) {
+            'mysql'  => $this->selectOne(
+                'SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+                [$table],
+            ),
+            'pgsql'  => $this->selectOne('SELECT COUNT(*) AS c FROM information_schema.tables WHERE table_name = ?', [$table]),
+            'sqlite' => $this->selectOne('SELECT COUNT(*) AS c FROM sqlite_master WHERE type = ? AND name = ?', ['table', $table]),
+            default  => null,
+        };
+
+        return (int) ($row['c'] ?? 0) > 0;
+    }
+
+    public function driver(): string
+    {
+        return $this->activeDriver();
+    }
+
+    public function ping(): bool
+    {
+        return $this->connectionError() === null;
+    }
+
+    public function connectionError(): ?string
+    {
+        try {
+            $this->pdo()->query('SELECT 1')->fetchColumn();
+
+            return null;
+        } catch (Throwable $e) {
+            // Без утечек: текст исключения PDO может содержать host/port —
+            // наружу отдаём только в debug (Kernel решает сам).
+            return $e->getMessage();
+        }
+    }
+
+    // ==================== Internal ====================
+
+    /** Абсолютный путь sqlite-файла из конфига (резолв через storage_path — п.7). */
+    private function sqliteFile(): ?string
+    {
+        $path = (string) $this->config->get('database.connections.sqlite.database', '');
+
+        if ($path === '') {
+            return null;
+        }
+
+        // Единая точка резолва относительного пути: ровно так же, как в
+        // PdoConnector::dsnSqlite() — через storage_path из контейнера (п.7).
+        // Прежняя логика (резолв от BASE_PATH) ломала симметрию: PDO открывал
+        // один файл, а tableExists/sizes смотрели в другой — реестр миграций
+        // ложно считался несозданным/несуществующим.
+        if (!str_starts_with($path, '/')) {
+            $storagePath = (string) $this->container->get('storage_path');
+            $path = rtrim($storagePath, '/') . '/' . $path;
+        }
+
+        return $path;
+    }
+
+    private function pdo(): PDO
+    {
+        if ($this->pdo instanceof PDO) {
+            return $this->pdo;
+        }
+
+        $driver = $this->activeDriver();
+
+        if (!$this->config->has("database.connections.{$driver}")) {
+            throw new RuntimeException("Модуль [Database]: неизвестный драйвер '{$driver}'.");
+        }
+
+        /** @var array<string,mixed> $connection */
+        $connection = $this->config->get("database.connections.{$driver}", []);
+        $connection['driver'] ??= $driver;
+
+        if (!(bool) ($connection['enabled'] ?? false)) {
+            throw new RuntimeException(
+                "Модуль [Database]: драйвер '{$driver}' выключен (enabled=false)."
+                . ' Включите его в config/database.php или DB_' . strtoupper($driver) . '_ENABLED=true в .env.'
+            );
+        }
+
+        $common = [
+            'emulate_prep' => (bool) $this->config->get('database.emulate_prep', false),
+            'timeout'      => (int) $this->config->get('database.timeout', 5),
+        ];
+
+        $storagePath = $this->container->has('storage_path')
+            ? (string) $this->container->get('storage_path')
+            : null;
+
+        $this->pdo = (new PdoConnector())->make([...$connection, ...$common], $storagePath);
+
+        return $this->pdo;
+    }
+
+    private function activeDriver(): string
+    {
+        return strtolower((string) $this->config->get('database.driver', 'mysql'));
+    }
+}
