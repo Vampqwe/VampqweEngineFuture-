@@ -39,8 +39,7 @@ final class Paths
         'cache'       => 'storage/cache',  // кэш движка (Cache, driver=file): storage/cache/<hh>/<key>.cache
         'queue'       => 'storage/queue',  // очереди задач (Queue, driver=file): pending/delayed/failed
         'sessions'    => 'storage/sessions', // file-стор сессий (Session, driver=file)
-        'database'    => 'database',       // SQL-дампы схемы движка (db.sql) — источник для Installer/миграций
-        'migrations'  => 'migrations',     // версии схемы БД (Migration): <ГГГГ_ММ_ДД_HHMMSS>_имя.php
+        'database'    => 'database',       // SQL-дампы схемы движка (*.sql) — единственный источник схемы для Installer/модуля Migration
     ];
 
     public function __construct(private readonly string $basePath)

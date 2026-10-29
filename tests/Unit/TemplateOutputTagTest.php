@@ -53,6 +53,11 @@ final class TemplateOutputTagTest extends TestCase
         );
     }
 
+    /**
+     * @constitution-exception п.7 Тест-инспекция читает исходник репозитория:
+     * корень получается бытовым dirname(__DIR__, 2) от namespace-папки tests/,
+     * DI/Paths в изолированном юнит-тесте недоступен.
+     */
     public function testStarterHomeTemplateCompilesToValidPhp(): void
     {
         $path     = \dirname(__DIR__, 2) . '/view/app/engineStart/home.phtml';
