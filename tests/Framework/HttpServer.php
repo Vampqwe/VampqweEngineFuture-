@@ -37,14 +37,103 @@ final class HttpServer
      *
      * @param array<string,string> $env       содержимое .env для инсталляции
      * @param bool                 $installed ставить ли флаг storage/.installed
+     * @param bool                 $migrate   развернуть ли схему из database/*.sql
+     *                                        (создать sqlite-файл с таблицами) до
+     *                                        старта сервера. Нужен тестам на
+     *                                        «установленный движок»: миграция в
+     *                                        ядре выполняется ТОЛЬКО установщиком,
+     *                                        поэтому хелпер применяет тот же
+     *                                        единственный путь — SqlSchemaMigrator.
      */
-    public static function boot(string $root, array $env, bool $installed = true): self
+    public static function boot(string $root, array $env, bool $installed = true, bool $migrate = false): self
     {
         $server = new self($root);
         $server->installFixture($env, $installed);
+        if ($migrate) {
+            $server->applySchema($env);
+        }
         $server->start();
 
         return $server;
+    }
+
+    /**
+     * Разворачивает схему БД стенда тем же единственным путём, что и установка:
+     * модуль Migration (SqlSchemaMigrator) поверх Database-модуля. Контейнер
+     * живёт только внутри этого вызова — серверу передаётся уже готовый файл.
+     *
+     * @param array<string,string> $env содержимое .env стенда
+     */
+    private function applySchema(array $env): void
+    {
+        $driver = strtolower($env['DB_DRIVER'] ?? 'sqlite');
+        if ($driver !== 'sqlite') {
+            throw new \RuntimeException('HttpServer::boot(migrate: true) поддерживает только sqlite-стенды.');
+        }
+
+        // Собираем тот же единственный путь, что и Installer: Config -> Database
+        // -> Migration (SqlSchemaMigrator). Кириллица в путях temp-каталога может
+        // ломать escapeshellarg у php -S, поэтому прогон — в дочернем процессе с
+        // ASCII-cwd; сервер получает уже готовый файл БД.
+        $script = <<<'PHP'
+<?php
+declare(strict_types=1);
+
+$root = getenv('ENGINE_STAND_ROOT');
+require $root . '/vendor/autoload.php';
+
+use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
+use App\Core\Module\Config\Internal\Parsers\PhpArrayParser;
+use App\Core\Module\Config\ConfigRepository;
+use App\Core\Module\Database\Contracts\DatabaseInterface;
+use App\Core\Module\Database\DatabaseManager;
+use App\Core\Module\FileSystem\FileSystem;
+use App\Core\Module\Hook\Hook;
+use App\Core\Module\Logger\Logger;
+use App\Core\Module\Migration\Internal\SqlSchemaMigrator;
+use App\Core\Module\TimeDate\TimeDate;
+use App\Core\System\Container\Container;
+use App\Core\System\Support\EnvLoader;
+
+$fs = new FileSystem();
+EnvLoader::load($root . '/.env');
+
+$container = new Container();
+$container->instance('storage_path', $root . '/storage');
+
+$config = new ConfigRepository(new PhpArrayParser(), $root . '/config');
+$container->instance(ConfigRepositoryInterface::class, $config);
+
+$db     = new DatabaseManager($container, $config);
+$logger = new Logger($fs, $root . '/storage/logs');
+
+$migrator = new SqlSchemaMigrator($db, $fs, new TimeDate(), $logger, new Hook(), $root . '/database');
+
+if (!$migrator->hasSchemaSource()) {
+    fwrite(STDERR, "В каталоге database/ нет дампа со CREATE TABLE — нечего разворачивать.\n");
+    exit(1);
+}
+$migrator->run();
+PHP;
+
+        $scriptPath = $this->dir . '/_migrate_stand.php';
+        file_put_contents($scriptPath, $script);
+
+        $cmd = sprintf(
+            'cd %s && ENGINE_STAND_ROOT=%s %s _migrate_stand.php',
+            escapeshellarg($this->dir),
+            escapeshellarg($this->dir),
+            PHP_BINARY,
+        );
+        exec($cmd . ' 2>&1', $output, $exitCode);
+
+        @unlink($scriptPath);
+
+        if ($exitCode !== 0) {
+            throw new \RuntimeException(
+                'Не удалось развернуть схему sqlite-стенда из database/*.sql: ' . implode("\n", $output),
+            );
+        }
     }
 
     public function port(): int
