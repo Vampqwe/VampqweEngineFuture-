@@ -212,7 +212,7 @@ final class Doctor implements DoctorInterface
                     $hasDef   = in_array(\App\Core\Module\Theme\Theme::DEFAULT_THEME, $themes, true);
                     $sites    = count($instance->sites());
                     if (!$hasDef || !in_array($current, $themes, true)) {
-                        return [false, "НЕЗДОРОВ: тема по умолчанию '_default' или текущая '{$current}' не найдена в view/app/"];
+                        return [false, "НЕЗДОРОВ: тема по умолчанию engineStart или текущая '{$current}' не найдена в view/app/"];
                     }
                     return [true, 'работает (тем: ' . count($themes)
                         . '[' . implode(',', $themes) . '], сайтов в реестре: ' . $sites . ')'];

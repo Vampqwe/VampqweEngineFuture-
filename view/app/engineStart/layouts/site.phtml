@@ -4,7 +4,7 @@
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>@yield('title', $appName)</title>
     {{-- Статика темы через модуль Assets (каскад site->theme->core):
-         файл view/app/_default/assets/css/site.css меняется без правки
+         файл view/app/engineStart/assets/css/site.css меняется без правки
          layout; сторонние модули дописывают своё через хук
          engine.assets.styles. Fallback — инлайн-стили, если Assets недоступен. --}}
 @if(($assetsStyles ?? '') !== '')

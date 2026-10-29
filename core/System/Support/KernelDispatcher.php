@@ -15,7 +15,7 @@ use App\Core\System\Support\SiteIdentity;
  * Выделен из Kernel по SRP (п.5: расширение без правки ядра): конвейер
  * маршрутизации остаётся в Kernel, «что отдавать на /» — здесь. Логика
  * поведения сохранена 1:1: честность фундамента (503 при недоступной БД),
- * мультисайт-резолв темы, авто-клон стартера view/app/_starter, хук
+ * мультисайт-резолв темы, авто-клон стартера view/app/engineStart-starter, хук
  * theme.resolved, публикация тегов Assets в шаблоны Template, fallback-текст.
  */
 final class KernelDispatcher
@@ -74,12 +74,12 @@ final class KernelDispatcher
             $site  = $themes->site();
 
             // Тема резолвлена, но её папки ещё нет (только что добавленный
-            // сайт) — авто-клон стартера view/app/_starter. Движок не падает:
-            // до клонирования рендер идёт через fallback '_default' в Template.
+            // сайт) — авто-клон стартера view/app/engineStart-starter. Движок не падает:
+            // до клонирования рендер идёт через fallback engineStart в Template.
             $fs = $this->bridge->fileSystem();
             if ($site !== null && $site['theme'] !== '' && !$themes->exists($site['theme']) && $fs !== null) {
                 $appView = $this->bridge->path('app_view_path');
-                $starter = $appView . '/_starter';
+                $starter = $appView . '/engineStart-starter';
                 $target  = $appView . '/' . $site['theme'];
                 if ($fs->isDirectory($starter) && $this->cloneStarter($fs, $starter, $target)) {
                     $themes->use($site['theme']);
@@ -141,9 +141,9 @@ final class KernelDispatcher
     }
 
     /**
-     * Мультисайт: рекурсивно клонирует папку-стартер темы (view/app/_starter)
+     * Мультисайт: рекурсивно клонирует папку-стартер темы (view/app/engineStart-starter)
      * в новую тему сайта. best effort: любой сбой FS означает «папки нет»,
-     * рендер уйдёт через fallback '_default' — движок не падает (принцип п.9).
+     * рендер уйдёт через fallback engineStart — движок не падает (принцип п.9).
      */
     private function cloneStarter(
         object $fs,

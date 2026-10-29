@@ -15,7 +15,7 @@ use App\Core\System\Http\Response;
  * HTTP-контроллер модуля Pages (внутренняя кухня, п.2 Конституции).
  *
  * Отдаёт страницу по ЧПУ-слагу через тему сайта (Template SCOPE_APP):
- *   /{slug} -> view/app/<theme>/pages/show.phtml (fallback на '_default').
+ *   /{slug} -> view/app/<theme>/pages/show.phtml (fallback на engineStart).
  *
  * Честная деградация (принцип «движок не падает»): если Database или
  * Template недоступны (до установки/выключенный модуль) — 404 как при

@@ -10,5 +10,5 @@ return [
     'cache' => filter_var($_ENV['TEMPLATE_CACHE'] ?? 'true', FILTER_VALIDATE_BOOLEAN),
 
     // Тема пользовательского сайта по умолчанию (view/app/<theme>/); мультисайт переключает через setTheme().
-    'theme' => (string) ($_ENV['APP_THEME'] ?? '_default'),
+    'theme' => (string) ($_ENV['APP_THEME'] ?? 'engineStart'),
 ];

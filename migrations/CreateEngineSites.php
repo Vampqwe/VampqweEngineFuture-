@@ -25,12 +25,12 @@ final class CreateEngineSites extends AbstractMigration
         $definition = $this->db->driver() === 'mysql'
             ? 'id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,'
               . "domain VARCHAR(191) NOT NULL UNIQUE,"
-              . "theme VARCHAR(64) NOT NULL DEFAULT '_default',"
+              . "theme VARCHAR(64) NOT NULL DEFAULT 'engineStart',"
               . "is_active SMALLINT NOT NULL DEFAULT 1,"
               . "created_at VARCHAR(40) NOT NULL DEFAULT ''"
             : 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
               . "domain VARCHAR(191) NOT NULL UNIQUE,"
-              . "theme VARCHAR(64) NOT NULL DEFAULT '_default',"
+              . "theme VARCHAR(64) NOT NULL DEFAULT 'engineStart',"
               . "is_active SMALLINT NOT NULL DEFAULT 1,"
               . "created_at VARCHAR(40) NOT NULL DEFAULT ''";
 
@@ -40,7 +40,7 @@ final class CreateEngineSites extends AbstractMigration
             // Доменный индекс (UNIQUE уже создаёт его в обеих СУБД) + сид:
             // локальная разработка localhost -> тема по умолчанию.
             $this->sql("INSERT INTO engine_sites (domain, theme, is_active, created_at)"
-                . " VALUES ('localhost', '_default', 1, '" . date('c') . "')");
+                . " VALUES ('localhost', 'engineStart', 1, '" . date('c') . "')");
         }
 
         return $created;
