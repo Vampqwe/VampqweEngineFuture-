@@ -5,6 +5,7 @@ namespace App\Core\System\Support;
 
 use App\Core\System\Http\Request;
 use App\Core\System\Http\Response;
+use App\Core\System\Support\SiteIdentity;
 
 /**
  * KernelDispatcher — рендер системных страниц ядра (главная) через контракты
@@ -43,14 +44,19 @@ final class KernelDispatcher
         }
         $status = $dbOk ? 200 : 503;
 
-        // Мультисайт: тема сайта по домену запроса — через модуль Theme
-        // (реестр engine_sites -> эвристика поддомена -> дефолт из config/template.php).
+        // Мультисайт: тема сайта по домену — через модуль Theme.
+        // Домен берётся из идентичности экземпляра (SITE_DOMAIN / BASE_URL_SITE,
+        // «один запуск = один сайт»); пустая идентичность -> легаси: Host
+        // запроса + реестр engine_sites -> эвристика поддомена -> дефолт.
         $theme = '';
         $site  = null;
         $themes = $this->bridge->themes();
 
         if ($themes !== null) {
-            $host  = $request->header('host') ?? '';
+            $configured = $this->bridge->siteDomain();
+            $host = $configured !== ''
+                ? $configured
+                : SiteIdentity::normalizeHost((string) ($request->header('host') ?? ''));
             $theme = $themes->resolveForRequest($host);
             $site  = $themes->site();
 

@@ -10,6 +10,7 @@ use App\Core\System\Http\Middleware\MaintenanceMode;
 use App\Core\System\Support\KernelDispatcher;
 use App\Core\System\Support\ModuleBridge;
 use App\Core\System\Support\Router;
+use App\Core\System\Support\SiteIdentity;
 use App\Core\System\Support\SuperAdmin;
 
 /**
@@ -92,7 +93,25 @@ class Kernel
             $this->globalMiddleware(),
             $this->maintenanceMiddleware($state),
         ));
-        $userRouter->get('/', fn(Request $r): Response => $this->homeResponse($r));
+
+        // Идентичность сайта (BASE_URL_SITE / SITE_DOMAIN): «один запуск =
+        // один сайт». Логика — в SiteIdentity (чистые функции), доступ к
+        // конфигу — через ModuleBridge (R6b). Пустая идентичность = легаси-
+        // режим: хост не проверяется, сайт резолвится реестром engine_sites.
+        $identity  = $this->bridge->siteDomain();
+        $strict    = $identity !== '' && $this->bridge->siteStrictHost();
+        $homeRoute = function (Request $r) use ($identity, $strict): Response {
+            if ($strict && !SiteIdentity::hostMatches($identity, (string) ($r->header('host') ?? ''))) {
+                // Чужой хост обслуживает НЕ этот экземпляр движка -> 404.
+                return $this->errorPage(404);
+            }
+
+            return $this->homeResponse($r);
+        };
+        $userRouter->get('/', $homeRoute);
+        // Домен из конфигурации — канонический адрес сайта; обращаемый и как
+        // '/index.php' (некоторые хостинги без rewrite прокидывают его в URI).
+        $userRouter->get('/index.php', $homeRoute);
 
         $this->registerModuleRoutes($userRouter);
 
@@ -312,18 +331,30 @@ class Kernel
 
     /**
      * Мультисайт-контекст запроса: тема + домен сайта через резолв Bridge.
+     *
+     * Источник домена (в порядке приоритета):
+     *   1. идентичность из конфигурации (SITE_DOMAIN / хост BASE_URL_SITE) —
+     *      «один запуск = один сайт», путаницы с Host-заголовком нет;
+     *   2. пустая идентичность -> легаси: Host запроса + реестр engine_sites.
      * Без Theme-модуля — прежняя эвристика поддомена (best effort, п.9).
      *
      * @return array{0: string, 1: ?string} [theme, domain]
      */
     private function siteContext(Request $request): array
     {
-        $themes = $this->bridge->themes();
-        if ($themes === null) {
-            return [$this->resolveThemeByHost((string) ($request->header('host') ?? '')), null];
+        $host = SiteIdentity::normalizeHost((string) ($request->header('host') ?? ''));
+
+        // Конфигурационная идентичность важнее заголовка запроса.
+        $configured = $this->bridge->siteDomain();
+        if ($configured !== '') {
+            $host = $configured;
         }
 
-        $host  = strtolower((string) ($request->header('host') ?? ''));
+        $themes = $this->bridge->themes();
+        if ($themes === null) {
+            return [$this->resolveThemeByHost($host), null];
+        }
+
         $theme = $themes->resolveForRequest($host);
         $site  = $themes->site();
 
