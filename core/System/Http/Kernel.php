@@ -41,6 +41,14 @@ class Kernel
         $session = $this->bridge->session();
 
         if ($session !== null) {
+            // Фоновое применение версий схемы (идемпотентно, best effort):
+            // если движок обновился и появились новые миграции (например,
+            // реестр сайтов engine_sites), они применяются до любых
+            // потребителей схемы — иначе главная деградировала бы к
+            // fallback-тексту вместо стартового сайта engineStart.
+            // Ошибки БД не роняют запрос (п.9) — диагностика в логе.
+            $this->applyPendingMigrationsOnce();
+
             // Однократная фоновая миграция file<->redis при СМЕНЕ session.driver:
             // оставшиеся записи старого стора переносятся в новый без потери сессий.
             $this->migrateSessionStoreOnce($session);
@@ -258,6 +266,41 @@ class Kernel
         }
 
         return $response;
+    }
+
+    /**
+     * Фоновое применение версий схемы БД (один раз на процесс-запрос).
+     *
+     * Cause: движок обновился, появились новые миграции (например, реестр
+     * сайтов engine_sites), но прогон migratorPending вызывался только
+     * инсталлером и вручную (bin/engine migrate) — главная деградировала
+     * к fallback-тексту вместо рендера стартового сайта. Теперь схема
+     * догоняется автоматически перед потребителями (Theme/SiteRegistry).
+     * Идемпотентно: pending() пустой => no-op. Best effort: ошибки БД
+     * не роняют запрос (п.9) — пишутся в лог каналом Migration.
+     */
+    private function applyPendingMigrationsOnce(): void
+    {
+        if ($this->migrationsApplied) {
+            return;
+        }
+
+        $this->migrationsApplied = true; // однократно на запрос, даже при ошибке
+
+        $migrator = $this->bridge->schemaMigrator();
+        if ($migrator === null) {
+            return; // модуль Migration недоступен — деградация как раньше
+        }
+
+        try {
+            $applied = $migrator->migratePending();
+            if ($applied !== []) {
+                $this->bridge->log('info', 'Фоновое применение миграций: ' . implode(', ', $applied), ['channel' => 'Migration']);
+            }
+        } catch (\Throwable $e) {
+            // БД могла быть временно недоступна — не роняем запрос (п.9)
+            $this->bridge->log('warning', 'Миграции не применены: ' . $e->getMessage(), ['channel' => 'Migration']);
+        }
     }
 
     /**
