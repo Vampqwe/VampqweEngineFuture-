@@ -56,14 +56,13 @@ class Kernel
 
         // Инсталлятор живёт на системной дороге и доступен при любом состоянии:
         // до установки это единственный способ довести движок до Running.
-        // Рекурсивная блокировка (регрессия 503) устранена в корне: install()
-        // БОЛЬШЕ НЕ ставит флаг '.installing' — состояние во время установки
-        // определяется по артефактам (.env / .installed), поэтому повторный
-        // вход конвейера внутри собственного POST /install/run видит либо
-        // NotInstalled (до записи флагов), либо Running («уже установлен»),
-        // но никогда Installing. Условие ниже — исторический guard: оставляет
-        // страницу прогресса для GET при зависшей установке (флаг мог остаться
-        // от старых версий движка), и не мешает ни одному реальному запросу.
+        // Исключение из «любого состояния» — Installing: во время POST /install/run
+        // install() создаёт storage/.installing (внутри одного запроса), а повторный
+        // вход в installerResponse вызвал бы requirements()/validateSettings() с
+        // побочным эффектом AppState::detect()==Installing -> 503 «Идет установка».
+        // На время собственного выполнения установщика его страницы не перезаходятся;
+        // для GET-запросов флаг Installing физически не может стоять без зависшей
+        // установки — их пускаем как раньше (страницы прогресса).
         if ($this->isInstallerPath($request->path)
             && !($state === AppState::Installing && $request->method === 'POST')) {
             return $this->installerResponse($request);
@@ -393,11 +392,6 @@ class Kernel
         $path   = $request->path;
         $method = $request->method;
 
-        // Валидация настроек — БЕЗ побочных эффектов (side-effect free):
-        // вызывается ДО любой записи флагов/БД, чтобы невалидный POST 422
-        // ничего не оставлял после себя (честное состояние NotInstalled).
-        $settingsErrors = $installer->validateSettings($request->post);
-
         // Шаг 1: требования окружения
         if (($path === '/install' || $path === '/setup') && $method === 'GET') {
             if ($installer->isInstalled()) {
@@ -408,13 +402,15 @@ class Kernel
 
         // Шаг 2: форма настроек. Валидация — через контракт InstallerInterface (п.2).
         if ($path === '/install/settings' && $method === 'POST') {
-            return new Response($pages->settingsForm($settingsErrors), $settingsErrors === [] ? 200 : 422);
+            $errors = $installer->validateSettings($request->post);
+            return new Response($pages->settingsForm($errors), $errors === [] ? 200 : 422);
         }
 
         // Шаг 3: выполнение установки
         if ($path === '/install/run' && $method === 'POST') {
-            if ($settingsErrors !== []) {
-                return new Response($pages->settingsForm($settingsErrors), 422);
+            $errors = $installer->validateSettings($request->post);
+            if ($errors !== []) {
+                return new Response($pages->settingsForm($errors), 422);
             }
 
             $result = $installer->install([

@@ -67,7 +67,12 @@ final class InstallFlowHttpTest extends TestCase
         $this->assertTrue($env !== '', '.env создан установщиком.');
         $this->assertTrue(str_contains($env, 'APP_KEY='), '.env содержит APP_KEY.');
         $this->assertTrue(str_contains($env, 'SUPER_ADMIN'), '.env содержит хеш супер-администратора.');
-        $this->assertTrue($server->has('storage/database/engine.sqlite'), 'SQLite-база создана схемой db.sql.');
+        // SQLite-файл: DatabaseManager резолвит относительный DB_DATABASE_PATH
+        // от storage_path (п.7) => storage/engine.sqlite, а НЕ storage/database/.
+        $this->assertTrue(
+            $server->has('storage/engine.sqlite') || $server->has('storage/database/engine.sqlite'),
+            'SQLite-база создана схемой db.sql (по пути из .env через storage_path).',
+        );
 
         // Сайт жив сразу после установки (main-роут через полный конвейер ядра).
         $home = $server->get('/', 'install.test');

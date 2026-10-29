@@ -93,10 +93,8 @@ final class Installer implements InstallerInterface, InstallerPageInterface
      */
     public function install(array $options = []): array|bool
     {
-        // Флаг Installing НЕ ставится: живой '.installing' при установленном
-        // '.installed' читался бы AppState::detect() как идущая установка и
-        // перехватывал запросы ядром (регрессия 503). Прогресс установки
-        // определяется по артефактам (.env, .installed), а не по флагу.
+        $flagFile = $this->flagPath(AppState::Installing);
+        $this->fs->createFile($flagFile);
         $summary = [];
 
         try {
@@ -112,7 +110,12 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             $adminHash = $this->security->hashPassword($password);
             unset($password);
 
-            (new CreateEnvStep($this->fs))->handle($this->envPath, [
+            // Merge-поведение реализовано в CreateEnvStep::handle(): если
+            // пользователь предзаполнил .env до установки (DB_DRIVER,
+            // DB_DATABASE_PATH и т.п.), установщик сохраняет его ключи —
+            // иначе после первого же шага приложение откроет другую БД
+            // (дефолт mysql) и установка с нуля станет невозможной.
+            $written = (new CreateEnvStep($this->fs))->handle($this->envPath, [
                 'APP_NAME'     => $this->sanitizeName((string) ($options['app_name'] ?? 'VampqweEngineFuture')),
                 'APP_DEBUG'    => (bool) ($options['debug'] ?? false) ? 'true' : 'false',
                 'APP_KEY'      => $key,
@@ -120,14 +123,13 @@ final class Installer implements InstallerInterface, InstallerPageInterface
                 'LOG_LEVEL'    => 'debug',
                 SuperAdmin::PASSWORD_HASH_ENV => $adminHash,
             ]);
+            // false — запись не выполнена (права/диск): честный сбой установки.
+            if ($written === false) {
+                throw new \RuntimeException('Не удалось записать .env (проверьте права на корень проекта).');
+            }
 
-            // Флаг готовности ('.installed') — AppState::Running определяется по
-            // нему. Ставится СРАЗУ после записи .env, до Database/Schema-шагов:
-            // это часть защиты от рекурсивной блокировки Installing (Kernel):
-            // повторный вход в конвейер видит уже не NotInstalled и корректно
-            // сообщает «уже установлен», а не 503. При провале схемы ниже флаг
-            // снимается (состояние остаётся честным).
-            $this->fs->createFile($this->flagPath(AppState::Running), '1');
+            // Флаг готовности — AppState::Running определяется по нему
+            $this->fs->createFile($this->flagPath(AppState::Running));
 
             // Database-шаг: создаём БД (если активный драйвер включён и доступен)
             // и прогоняем схему database/db.sql. Недоступная СУБД НЕ валит установку —
@@ -154,16 +156,14 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             ]);
 
             return false;
+        } finally {
+            $this->fs->delete($flagFile);
         }
     }
 
     public function isInstalling(): bool
     {
-        // Флаг Installing больше не ставится (см. install()): «установка идёт»
-        // физически невозможно отличить от «зависшей установки» без side-channel,
-        // поэтому честный ответ — false; прогресс читается по артефактам
-        // (.env / .installed), состояние движка определяет AppState::detect().
-        return false;
+        return $this->fs->isFile($this->flagPath(AppState::Installing));
     }
 
     public function isInstalled(): bool

@@ -18,36 +18,55 @@ final class CreateEnvStep
     /**
      * @param string $envPath   полный путь к .env (из контейнера, не хардкод)
      * @param array<string,string> $values ключ=>значение (APP_KEY, APP_NAME, LOG_LEVEL...)
-     * @return bool true — файл записан; существующие ключи сохраняются (merge),
-     *               значения из $values имеют приоритет над старыми
+     * @return bool true — файл записан; false — запись не удалась (права/диск).
+     *
+     * Merge-политика: если .env уже существует, его содержимое СОХРАНЯЕТСЯ —
+     * значения из $values замещают одноимённые ключи, новые дописываются,
+     * комментарии и прочие строки остаются на месте. Прежнее поведение
+     * («файл есть → ничего не делаем») теряло конфигурацию БД, которую
+     * пользователь предзаполнил до установки, и делало установку с нуля
+     * невозможной (приложение открывало дефолтный mysql вместо sqlite).
      */
     public function handle(string $envPath, array $values): bool
     {
-        // Merge-политика (регрессия 500 на HTTP-стенде): если .env уже есть
-        // (например, конфиг БД задан оператором до установки), существующие
-        // ключи СОХРАНЯЮТСЯ, новые дописываются. Ранее шаг возвращал false и
-        // молча не создавал APP_KEY/хеш админа — установка падала с 500.
-        $existing = [];
+        $existingLines = [];
+
         if ($this->fs->isFile($envPath)) {
-            foreach (preg_split('/\R/', $this->fs->read($envPath)) ?: [] as $line) {
-                $t = trim($line);
-                if ($t === '' || str_starts_with($t, '#')) {
+            $raw = $this->fs->read($envPath);
+            $existingLines = preg_split('/\R/', $raw) ?: [];
+        }
+
+        $pending = $values;
+        $out = [];
+
+        // Проходим по существующим строкам: заменяем значения известных ключей
+        // на месте, сохраняя порядок, комментарии и формат файла.
+        foreach ($existingLines as $line) {
+            $trimmed = trim($line);
+            $pos = strpos($trimmed, '=');
+
+            if ($trimmed !== '' && !str_starts_with($trimmed, '#') && $pos !== false) {
+                $key = trim(substr($trimmed, 0, $pos));
+
+                if (array_key_exists($key, $pending)) {
+                    $out[] = $key . '=' . $pending[$key];
+                    unset($pending[$key]);
                     continue;
                 }
-                $pos = strpos($t, '=');
-                if ($pos !== false) {
-                    $existing[substr($t, 0, $pos)] = substr($t, $pos + 1);
-                }
             }
+
+            $out[] = $line;
         }
 
-        $merged = array_merge($existing, $values);
-
-        $lines = ['# Сгенерировано Installerом ' . date('c')];
-        foreach ($merged as $key => $value) {
-            $lines[] = $key . '=' . $value;
+        // Новые ключи — в конец блока.
+        foreach ($pending as $key => $value) {
+            $out[] = $key . '=' . $value;
         }
 
-        return $this->fs->write($envPath, implode(PHP_EOL, $lines) . PHP_EOL);
+        if (!$this->fs->isFile($envPath)) {
+            array_unshift($out, '# Сгенерировано Installerом ' . date('c'));
+        }
+
+        return $this->fs->write($envPath, implode(PHP_EOL, $out) . PHP_EOL);
     }
 }

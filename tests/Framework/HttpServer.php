@@ -144,7 +144,14 @@ final class HttpServer
     private function installFixture(array $env, bool $installed): void
     {
         // Копия точки входа и ресурсов проекта в изолированный стенд.
-        exec('cp -R ' . escapeshellarg($this->root) . '/. ' . escapeshellarg($this->dir) . ' 2>/dev/null');
+        // Исключаем рабочие артефакты исходного дерева (.env, содержимое
+        // storage/) — иначе cp создаёт уже существующие каталоги и шумит
+        // mkdir()-варнингами, а стенд наследует чужое состояние.
+        exec(
+            'rsync -a --exclude=.env --exclude=storage/ ' . escapeshellarg($this->root) . '/. '
+            . escapeshellarg($this->dir) . ' 2>/dev/null || cp -R '
+            . escapeshellarg($this->root) . '/. ' . escapeshellarg($this->dir) . ' 2>/dev/null'
+        );
         if (!is_dir($this->dir . '/public')) {
             throw new \RuntimeException('Не удалось подготовить HTTP-стенд из ' . $this->root);
         }
@@ -155,8 +162,10 @@ final class HttpServer
         }
         file_put_contents($this->dir . '/.env', implode("\n", $lines) . "\n");
 
-        if (!is_dir($this->dir . '/storage')) {
-            mkdir($this->dir . '/storage', 0775, true);
+        // Пустой каталог storage стенда: флаги/БД/логи живут только здесь.
+        @mkdir($this->dir . '/storage', 0775, true);
+        foreach (['logs', 'cache', 'sessions', 'database'] as $sub) {
+            @mkdir($this->dir . '/storage/' . $sub, 0775, true);
         }
         if ($installed) {
             file_put_contents($this->dir . '/storage/.installed', '1');
