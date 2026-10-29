@@ -5,7 +5,7 @@ namespace App\Core\Module\Admin\Internal;
 
 use App\Core\Enums\AppState;
 use App\Core\Module\Database\Contracts\DatabaseInterface;
-use App\Core\Module\Migration\Contracts\MigratorInterface;
+use App\Core\Module\Migration\Contracts\MigrationInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Support\ModuleBridge;
 
@@ -163,13 +163,15 @@ final class EngineInfoService
             $block['tables'][] = ['table' => $table, 'label' => $label, 'rows' => (int) ($cnt['c'] ?? 0)];
         }
 
-        $migrator = $this->container->tryGet(MigratorInterface::class);
-        if ($migrator instanceof MigratorInterface) {
+        // Статус схемы — read-only по SQL-дампам (миграция выполняется только
+        // установщиком; точка расширения для будущей admin-опции «Миграция БД»).
+        $migrator = $this->container->tryGet(MigrationInterface::class);
+        if ($migrator instanceof MigrationInterface) {
             try {
-                $status             = $migrator->status();
+                $plan               = $migrator->plan();
                 $block['migration'] = [
-                    'applied' => count($status['applied'] ?? []),
-                    'pending' => count($status['pending'] ?? []),
+                    'applied' => count($plan['tables']) - count($plan['missing']),
+                    'pending' => count($plan['missing']),
                 ];
             } catch (\Throwable) {
                 $block['migration'] = null; // реестр ещё не создан — empty-state

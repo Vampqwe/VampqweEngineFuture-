@@ -417,26 +417,18 @@ final class Installer implements InstallerInterface, InstallerPageInterface
     }
 
     /**
-     * Имена таблиц из SQL-дампа (CREATE TABLE [IF NOT EXISTS] `name`).
-     * Используется для честной проверки идемпотентности схемы.
+     * Schema-шаг установки — ЕДИНСТВЕННЫЙ путь миграции схемы движка.
      *
-     * @return list<string>
-     */
-    private function dumpTables(string $sql): array
-    {
-        preg_match_all(
-            '/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"\[]?([A-Za-z0-9_]+)[`"\]]?/i',
-            $sql,
-            $m,
-        );
-
-        return array_values(array_unique($m[1] ?? []));
-    }
-
-    /**
-     * Schema-шаг установки: прогон дампа database/db.sql через Database::migrate().
-     * Идемпотентно: если таблица схемы уже существует — повторный пропуск не выполняется.
-     * Путь к папке приходит ИЗ ЕДИНОЙ ТОЧКИ ПРАВДЫ (database_path <- Support\Paths).
+     * Источник схемы — SQL-дампы database/*.sql (модуль Migration, контракт
+     * MigrationInterface). Фоновых/повторных прогонов схемы ядро не делает:
+     * миграция выполняется ТОЛЬКО здесь, при установке.
+     *
+     * Сценарии (по ТЗ):
+     *  - в database/ есть *.sql с CREATE TABLE  => прогон дампа;
+     *  - файлов нет или в них нет CREATE TABLE  => предупреждение пользователю
+     *    «необходимо создать базу данных» (UI-шаг Database с полем ввода DSN);
+     *  - недоступная СУБД / отсутствие модуля  => честное «пропущено» (п.9),
+     *    установка с пустой схемой невозможна (флаг .installed снимается).
      */
     private function applySchema(): string
     {
@@ -446,47 +438,31 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
         try {
             if (!$this->db->ping()) {
-                return 'пропущено (СУБД недоступна — включите драйвер и повторите миграцию позже)';
+                return 'пропущено (СУБД недоступна — включите драйвер и повторите установку)';
             }
 
-            // Фиксированное имя дампа; папка — только из Paths, без dirname/конкатенаций корня.
-            $dumpFile = rtrim($this->databasePath, '/') . '/db.sql';
-            if (!$this->fs->isFile($dumpFile)) {
-                return "пропущено (не найден {$dumpFile})";
+            // Модуль Migration обязателен для schema-шага: он — единственный
+            // легальный исполнитель дампов. Без него схема не разворачивается.
+            if ($this->migrator === null) {
+                return 'пропущено (модуль Migration недоступен)';
             }
 
-            // Идемпотентность по ПОЛНОМУ набору таблиц дампа, а не по одной «счастливой»
-            // таблице: ранее схема могла быть развёрнута частично (например, упал один
-            // оператор), и проверка по 'pages' давала ложное «уже развёрнута».
-            $tables     = $this->dumpTables($this->fs->read($dumpFile));
-            $missing    = array_values(array_filter(
-                $tables,
-                fn (string $t): bool => !$this->db->tableExists($t),
-            ));
-
-            if ($tables !== [] && $missing === []) {
-                return 'уже развёрнута (' . count($tables) . ' таблиц схемы обнаружено, пропущено)';
+            // Нет источника схемы (пусто в database/ или в дампах нет CREATE TABLE)
+            // => не падаем, а просим пользователя создать БД вручную (UI-шаг).
+            if (!$this->migrator->hasSchemaSource()) {
+                return 'предупреждение: в каталоге database/ не найдено SQL-дампов с CREATE TABLE'
+                    . ' — необходимо создать базу данных вручную (шаг «База данных»)'
+                    . ' и поместить дамп схемы в database/, затем повторить установку.';
             }
 
-            // Прогон дампа идемпотентен ТОЛЬКО в режиме полного набора (см.
-            // DatabaseInterface::migrate): при частично развёрнутой схеме
-            // (например, после упавшего оператора) уже существующие таблицы
-            // пропускаются, недостающие — досоздаются. Без этого шага повторная
-            // установка падала на «table already exists».
-            $statements = $this->db->migrate($this->fs->read($dumpFile), skipExisting: true);
+            $report = $this->migrator->run();
 
-            $this->logger->info("Схема БД развёрнута: {$statements} операторов из db.sql", [
-                'channel' => 'Installer',
-            ]);
+            $this->logger->info(
+                "Схема БД развёрнута: {$report['statements']} операторов из " . implode(', ', $report['files']),
+                ['channel' => 'Installer'],
+            );
 
-            // Автоприменение версий схемы (модуль Migration) сразу после дампа —
-            // деградирует тихо, если миграций/БД нет (migratePending не бросает).
-            $appliedMigrations = $this->migrator?->migratePending() ?? [];
-            $migrationNote = $appliedMigrations === []
-                ? ''
-                : ', применено миграций: ' . count($appliedMigrations);
-
-            return "развёрнута ({$statements} операторов из db.sql{$migrationNote})";
+            return "развёрнута ({$report['statements']} операторов из " . implode(', ', $report['files']) . ')';
         } catch (Throwable $e) {
             $this->logger->error('Schema-шаг установки не выполнен: ' . $e->getMessage(), [
                 'channel' => 'Installer',

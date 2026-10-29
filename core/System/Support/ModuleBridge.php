@@ -54,16 +54,10 @@ final class ModuleBridge
     }
 
     /**
-     * Мигратор схемы БД (модуль Migration) — capability-lookup.
-     * Используется ядром для фонового применения pending-миграций;
-     * null => модуль недоступен, деградация по п.9.
+     * Capability Session: фоновая миграция сторов (Internal-механика за контрактом).
+     * ВНИМАНИЕ: это НЕ миграция схемы БД — схема разворачивается только
+     * установщиком (единственный путь, ТЗ PR #74).
      */
-    public function schemaMigrator(): ?\App\Core\Module\Migration\Contracts\MigratorInterface
-    {
-        return $this->opt(\App\Core\Module\Migration\Contracts\MigratorInterface::class);
-    }
-
-    /** Capability Session: фоновая миграция сторов (Internal-механика за контрактом). */
     public function storeMigrator(): ?\App\Core\Module\Session\Contracts\SessionStoreMigratorInterface
     {
         return $this->opt(\App\Core\Module\Session\Contracts\SessionStoreMigratorInterface::class);

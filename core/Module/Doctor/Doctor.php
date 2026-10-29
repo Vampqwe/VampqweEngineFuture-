@@ -38,7 +38,7 @@ final class Doctor implements DoctorInterface
             'ArrayHelper' => \App\Core\Module\ArrayHelper\Contracts\ArrayHelperInterface::class,
             'Session'     => \App\Core\Module\Session\Contracts\SessionInterface::class,
             'Hook'        => \App\Core\Module\Hook\Contracts\HookInterface::class,
-            'Migration'   => \App\Core\Module\Migration\Contracts\MigratorInterface::class,
+            'Migration'   => \App\Core\Module\Migration\Contracts\MigrationInterface::class,
         ],
     ) {
     }
@@ -174,12 +174,19 @@ final class Doctor implements DoctorInterface
                     // Движок жив, но СУБД недоступна — это предупреждение, не «OK».
                     return [false, "драйвер '{$driver}': соединение недоступно (проверьте .env / запуск СУБД)"];
                 case 'Migration':
-                    /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $instance */
-                    $st = $instance->status();
-                    if ($st['pending'] > 0) {
-                        return [true, "ждут применения миграции: {$st['pending']} из {$st['total']}"];
+                    /** @var \App\Core\Module\Migration\Contracts\MigrationInterface $instance */
+                    // Миграция схемы выполняется ТОЛЬКО установщиком; Doctor —
+                    // честный read-only статус: есть ли источник и что не развёрнуто.
+                    if (!$instance->hasSchemaSource()) {
+                        return [false, 'в database/ нет SQL-дампов с CREATE TABLE — источник схемы отсутствует'];
                     }
-                    return [true, "схема в актуальном состоянии ({$st['applied']} миграций)"];
+                    $plan = $instance->plan();
+                    if ($plan['missing'] !== []) {
+                        return [false, 'таблиц схемы не развёрнуто: ' . implode(', ', $plan['missing'])
+                            . ' (миграция выполняется установщиком)'];
+                    }
+                    return [true, 'схема в актуальном состоянии (' . count($plan['tables']) . ' таблиц из '
+                        . count($plan['files']) . ' дампов)'];
                 case 'Cache':
                     /** @var \App\Core\Module\Cache\Contracts\CacheInterface $instance */
                     $probeKey = 'doctor:cache:probe';

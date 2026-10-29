@@ -10,7 +10,7 @@ use App\Core\Module\Installer\Contracts\InstallerInterface;
 use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\Module\Installer\Installer;
 use App\Core\Module\Logger\Contracts\LoggerInterface;
-use App\Core\Module\Migration\Contracts\MigratorInterface;
+use App\Core\Module\Migration\Contracts\MigrationInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 use App\Core\System\Contracts\ModuleProviderInterface;
@@ -42,8 +42,9 @@ class InstallerServiceProvider implements ModuleProviderInterface
                 $c->has(DatabaseInterface::class) ? $c->get(DatabaseInterface::class) : null,
                 // Папка дампов схемы — из единой точки правды Paths (п.7).
                 $c->has('database_path') ? (string) $c->get('database_path') : '',
-                // Migration — опционально: автоприменение версий схемы после db.sql.
-                $c->has(MigratorInterface::class) ? $c->get(MigratorInterface::class) : null,
+                // Migration — ЕДИНСТВЕННЫЙ путь развёртывания схемы (SQL-дампы
+                // database/*.sql), выполняется только здесь — на установке движка.
+                $c->has(MigrationInterface::class) ? $c->get(MigrationInterface::class) : null,
                 // Template — опционально: страницы установщика через view/core/installer/*.
                 $c->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)
                     ? $c->get(\App\Core\Module\Template\Contracts\TemplateInterface::class)
