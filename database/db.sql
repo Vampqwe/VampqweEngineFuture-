@@ -214,6 +214,24 @@ ALTER TABLE `engine_sites`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `uk_domain` (`domain`);
 
+-- --------------------------------------------------------
+
+--
+-- ДАННЫЕ (сид) таблицы `engine_sites`
+--
+-- Стартовый сайт движка: localhost рендерится темой engineStart (гайд в
+-- view/app/engineStart/home.phtml). Без этой записи реестр мультисайта пуст,
+-- резолвер не находит дефолтный сайт и главная уходит в голый fallback-текст.
+-- Формура INSERT ... SELECT ... WHERE NOT EXISTS переносима (mysql/sqlite/
+-- pgsql) и идемпотентна при повторном прогоне дампа: запись создаётся только
+-- если домен ещё не зарегистрирован (в т.ч. после ручного редактирования
+-- реестра пользователем).
+--
+
+INSERT INTO `engine_sites` (`domain`, `theme`, `title`, `is_active`, `created_at`)
+SELECT 'localhost', 'engineStart', 'engineStart', 1, '2026-01-01T00:00:00+00:00'
+WHERE NOT EXISTS (SELECT 1 FROM `engine_sites` WHERE `domain` = 'localhost');
+
 --
 -- Индексы таблицы `users`
 --
