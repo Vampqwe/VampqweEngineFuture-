@@ -255,7 +255,10 @@ final class AdminController implements AdminPanelInterface
             $security = $this->container->get(\App\Core\Module\Security\Contracts\SecurityInterface::class);
             assert($security instanceof \App\Core\Module\Security\Contracts\SecurityInterface);
             if ($security->verifyPassword($password, (string) \App\Core\System\Support\SuperAdmin::expectedHash())) {
-                $session->start(); // антификсация: новый id при повышении привилегий (как в Auth)
+                // Антификсация при повышении привилегий — через startPreservingCsrf():
+                // новый id, но CSRF-токен переносится в новую запись до удаления старой.
+                // Голый start() здесь терял токен и приводил к 419 на следующем POST.
+                $session->startPreservingCsrf();
                 $session->set('super_admin_verified', true);
                 $session->set('admin_verified_at', ['at' => time(), 'uid' => 0]);
                 $this->hooks?->dispatch('admin.login', 0, $login);
@@ -276,7 +279,9 @@ final class AdminController implements AdminPanelInterface
                 && $users->verifyPassword($user, $password)
                 && in_array((string) ($user['role'] ?? ''), AdminGuard::ADMIN_ROLES, true)
             ) {
-                $session->start();
+                // Антификсация при повышении привилегий — startPreservingCsrf()
+                // (голый start() терял CSRF-токен -> 419 на следующем POST).
+                $session->startPreservingCsrf();
                 $session->set('auth_user_id', (int) $user['id']);
                 $session->set('admin_verified_at', ['at' => time(), 'uid' => (int) $user['id']]);
                 $this->hooks?->dispatch('admin.login', (int) $user['id'], $login);

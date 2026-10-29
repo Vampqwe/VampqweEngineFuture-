@@ -62,6 +62,21 @@ final class ModuleSession implements SessionInterface, SessionStoreMigratorInter
         return $this->id;
     }
 
+    public function startPreservingCsrf(): string
+    {
+        $this->ensureLoaded();
+        $csrf = $this->get('_csrf', null);
+        $csrf = is_string($csrf) && strlen($csrf) >= 32 ? $csrf : null;
+
+        $newId = $this->start(); // новый id, старая запись уничтожена, data очищены
+
+        if ($csrf !== null) {
+            $this->set('_csrf', $csrf); // токен переживает ротацию — формы не «протухают» на 419
+        }
+
+        return $newId;
+    }
+
     public function get(string $key, mixed $default = null): mixed
     {
         $this->ensureLoaded();

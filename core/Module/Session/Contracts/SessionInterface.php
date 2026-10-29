@@ -20,6 +20,14 @@ interface SessionInterface
     /** Начать новую сессию (с перегенерацией id — защита от fixation). */
     public function start(): string;
 
+    /**
+     * Антификсация при повышении привилегий: новый id, но CSRF-токен
+     * переносится в новую запись ДО удаления старой. Голый start() на этом
+     * месте очищает данные вместе со старым токеном — следующая POST-форма
+     * с прежним значением поля _csrf получала 419.
+     */
+    public function startPreservingCsrf(): string;
+
     /** Значение по ключу; $default — что вернуть при отсутствии (вызывающий обязан передать явно). */
     public function get(string $key, mixed $default): mixed;
 
