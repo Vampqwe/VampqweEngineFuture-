@@ -11,7 +11,7 @@ use App\Core\Module\Installer\Contracts\InstallerPageInterface;
 use App\Core\Module\Installer\Internal\InstallerView;
 use App\Core\Module\Installer\Internal\Steps\CreateEnvStep;
 use App\Core\Module\Logger\Contracts\LoggerInterface;
-use App\Core\Module\Migration\Contracts\MigratorInterface;
+use App\Core\Module\Migration\Contracts\MigrationInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
 use App\Core\System\Enums\AppState;
 use App\Core\System\Support\SuperAdmin;
@@ -53,9 +53,9 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         private readonly LoggerInterface $logger,
         private readonly ?DatabaseInterface $db = null,
         private readonly string $databasePath = '',
-        // Migration — опциональная зависимость: после развёртки db.sql автоматически
-        // применяются ожидающие версии схемы (migrations/ <- Paths).
-        private readonly ?MigratorInterface $migrator = null,
+        // Migration — опциональная зависимость: ЕДИНСТВЕННЫЙ путь развёртывания
+        // схемы (SQL-дампы database/*.sql) выполняется ТОЛЬКО здесь, на установке.
+        private readonly ?MigrationInterface $migrator = null,
         // Template — опциональная зависимость для страниц установщика (view/core/installer/*);
         // без неё — graceful fallback на внутренний InstallerView.
         private readonly ?\App\Core\Module\Template\Contracts\TemplateInterface $views = null,

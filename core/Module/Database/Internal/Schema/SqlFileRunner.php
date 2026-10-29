@@ -79,11 +79,16 @@ final class SqlFileRunner
 
     /**
      * Идемпотентная досоздка: определяет, создаёт ли данный оператор таблицу,
-     * которая уже присутствует в СУБД (список $existingTables из information_schema
+     * которая уже присутствует в СУБД ($existingTables из information_schema
      * / sqlite_master). Используется при повторном прогоне дампа схемы (re-install),
      * чтобы не падать на DDL-конфликте "table already exists".
      *
-     * @param list<string> $existingTables имена существующих таблиц (в нижнем регистре)
+     * Формат $existingTables — хеш-карта lowercase => true (как отдаёт
+     * DatabaseManager::existingTables()): сверка по array_key_exists, а не
+     * in_array по значениям (значения — bool, сравнение давало вечный false
+     * и повторный прогон падал на первом же DDL).
+     *
+     * @param array<string,true> $existingTables
      */
     private function createsExistingTable(string $statement, array $existingTables): bool
     {
@@ -91,7 +96,7 @@ final class SqlFileRunner
             return false; // CREATE TABLE ... AS SELECT / прочее — не наш случай
         }
 
-        return in_array(strtolower($m[1]), $existingTables, true);
+        return array_key_exists(strtolower($m[1]), $existingTables);
     }
 
     private function execute(PDO $pdo, string $statement, array &$executed): void

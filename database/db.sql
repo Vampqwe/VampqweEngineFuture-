@@ -158,19 +158,67 @@ CREATE TABLE `tasks` (
 
 CREATE TABLE `users` (
   `id` int UNSIGNED NOT NULL,
-  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Email для входа',
-  `password_hash` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Хэш пароля (password_hash)',
-  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Имя пользователя',
-  `role` enum('admin','editor','viewer') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'viewer' COMMENT 'Роль: admin, editor, viewer',
+  `email` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Email для входа (уникален)',
+  `name` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT 'Имя пользователя',
+  `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Хэш пароля password_hash() (argon2id/bcrypt)',
+  `role` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'user' COMMENT 'Роль: user, editor, admin, super_administrator',
   `is_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'Активен ли пользователь',
   `last_login_at` timestamp NULL DEFAULT NULL COMMENT 'Последний вход',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_at` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT 'Момент создания (ISO-8601)',
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Пользователи админки';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Пользователи (модуль Auth + админ-панель): единая учётная запись';
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `engine_settings` (хранилище настроек движка key/value)
+--
+
+CREATE TABLE `engine_settings` (
+  `id` int UNSIGNED NOT NULL,
+  `key` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Ключ настройки',
+  `value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Значение настройки',
+  `updated_at` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT 'Момент изменения (ISO-8601)'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Настройки движка (ключ-значение)';
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `engine_sites` (реестр сайтов мультисайта: domain -> theme)
+--
+
+CREATE TABLE `engine_sites` (
+  `id` int UNSIGNED NOT NULL,
+  `domain` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Домен сайта (уникален)',
+  `theme` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'engineStart' COMMENT 'Тема из view/app/',
+  `title` varchar(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT 'Название сайта для шаблонов тем',
+  `is_active` smallint NOT NULL DEFAULT '1' COMMENT 'Активен ли сайт',
+  `created_at` varchar(40) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '' COMMENT 'Момент регистрации (ISO-8601)'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Реестр сайтов мультисайта (модуль Theme)';
 
 --
 -- Индексы сохранённых таблиц
 --
+
+--
+-- Индексы таблицы `engine_settings`
+--
+ALTER TABLE `engine_settings`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uk_key` (`key`);
+
+--
+-- Индексы таблицы `engine_sites`
+--
+ALTER TABLE `engine_sites`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uk_domain` (`domain`);
+
+--
+-- Индексы таблицы `users`
+--
+ALTER TABLE `users`
+  ADD UNIQUE KEY `uk_email` (`email`);
 
 --
 -- Индексы таблицы `authors`
@@ -247,6 +295,18 @@ ALTER TABLE `users`
 --
 -- AUTO_INCREMENT для сохранённых таблиц
 --
+
+--
+-- AUTO_INCREMENT для таблицы `engine_settings`
+--
+ALTER TABLE `engine_settings`
+  MODIFY `id` int UNSIGNED NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT для таблицы `engine_sites`
+--
+ALTER TABLE `engine_sites`
+  MODIFY `id` int UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT для таблицы `authors`
