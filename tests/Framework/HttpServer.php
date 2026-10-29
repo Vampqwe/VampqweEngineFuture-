@@ -52,7 +52,26 @@ final class HttpServer
         if ($migrate) {
             $server->applySchema($env);
         }
-        $server->start();
+        // Снимем снимок каталога ДО старта сервера: php -S пишет stderr в
+        // неблокируемые пайпы с буфером ~64 КБ — после переполнения буфера
+        // сервер может блокироваться, и читать пайпы «в момент падения»
+        // уже поздно. Фиксация состояния сразу даёт честную диагностику.
+        try {
+            $server->start();
+        } catch (\Throwable $e) {
+            $diag = [];
+            foreach (['storage/logs' => 'логи ядра', 'view/app/engineStart' => 'шаблоны темы'] as $rel => $label) {
+                $files = glob($server->dir . '/' . $rel . '/*') ?: [];
+                $diag[] = $label . ': ' . implode(', ', array_map('basename', $files));
+            }
+            $dbFile = $server->dir . '/storage/' . ($env['DB_DATABASE_PATH'] ?? 'engine.sqlite');
+            $diag[] = is_file($dbFile)
+                ? 'БД: ' . $dbFile . ' (' . filesize($dbFile) . ' байт)'
+                : 'БД: файл НЕ найден по пути ' . $dbFile;
+            throw new \RuntimeException(
+                $e->getMessage() . "\n--- Диагностика стенда ---\n" . implode("\n", $diag),
+            );
+        }
 
         return $server;
     }
