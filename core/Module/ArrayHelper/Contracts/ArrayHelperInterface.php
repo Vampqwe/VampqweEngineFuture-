@@ -10,7 +10,7 @@ namespace App\Core\Module\ArrayHelper\Contracts;
 interface ArrayHelperInterface
 {
     /** Значение по точечному ключу, если нет — $default. */
-    public function get(array $array, string $key, mixed $default = null): mixed;
+    public function get(array $array, string $key, mixed $default): mixed;
 
     /** Существование ключа по точечной нотации. */
     public function has(array $array, string $key): bool;
@@ -34,7 +34,7 @@ interface ArrayHelperInterface
     public function except(array $array, array $keys): array;
 
     /** Первый элемент, проходящий через callback. */
-    public function first(array $array, ?callable $callback = null, mixed $default = null): mixed;
+    public function first(array $array, ?callable $callback, mixed $default): mixed;
 
     /** Все элементы, проходящие через callback (значение + ключ). */
     public function filter(array $array, callable $callback): array;

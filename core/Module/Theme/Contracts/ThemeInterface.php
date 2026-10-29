@@ -17,6 +17,13 @@ namespace App\Core\Module\Theme\Contracts;
 interface ThemeInterface
 {
     /**
+     * Специальная тема-фолбэк для сайтов без своей папки. Живёт в контракте,
+     * а не в классе Theme: ядро (Kernel) резолвит дефолт по интерфейсу и не
+     * знает конкретную реализацию (п.1/п.2, правило R6 линтера).
+     */
+    public const DEFAULT_THEME = '_default';
+
+    /**
      * Активировать тему для домена запроса: БД-реестр engine_sites ->
      * эвристика поддомена -> config-тема по умолчанию. Возвращает имя
      * применённой темы ('' = оставить тему по умолчанию).
@@ -40,13 +47,20 @@ interface ThemeInterface
      *
      * @return array{domain:string,theme:string,title:string}|null
      */
-    public function site(?string $host = null): ?array;
+    public function site(?string $host): ?array;
 
     /**
      * Зарегистрировать сайт в реестре (домен -> тема). Идемпотентно по домену.
      * false — если БД недоступна/не установлена или таблица не пишет.
      */
-    public function registerSite(string $domain, string $theme, string $title = ''): bool;
+    public function registerSite(string $domain, string $theme, string $title): bool;
+
+    /**
+     * Гарантировать наличие сайта-идентичности в реестре («один запуск = один
+     * сайт»): если домен уже зарегистрирован — НЕ перетирает тему/заголовок,
+     * иначе создаёт запись. Возвращает false только при недоступной БД.
+     */
+    public function ensureSite(string $domain, string $theme, string $title): bool;
 
     /** Немедленно переключить шаблонизатор на тему (без проверки домена). */
     public function use(string $theme): void;

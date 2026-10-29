@@ -6,6 +6,12 @@ namespace App\Core\System\Support;
 /**
  * ЕДИНАЯ ТОЧКА ПРАВДЫ О ПУТЯХ (п.7 Конституции).
  *
+ * @constitution-exception п.3/п.7 — физический bootstrap путей: конструктор
+ * принимает абсолютный корень проекта (значение глобальной BASE_PATH из
+ * public/index.php и bin/engine — единственных мест её определения). Это
+ * единственный потребитель BASE_PATH в ядре наряду с App; запись в белом
+ * списке R8/R7 линтера, аннотация обязательна.
+ *
  * Все пути проекта объявляются ТОЛЬКО здесь. Больше нигде:
  *  - никаких dirname(__DIR__, N) в ядре и модулях;
  *  - никаких конкатенаций BASE_PATH . '/...' в потребителях;
@@ -22,6 +28,7 @@ final class Paths
      */
     private const MAP = [
         'base'        => '.',             // корень проекта (BASE_PATH)
+        'env'         => '.env',          // конфигурация окружения (EnvLoader/Installer)
         'config'      => 'config',
         'storage'     => 'storage',
         'public'      => 'public',

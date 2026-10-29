@@ -3,9 +3,10 @@ declare(strict_types=1);
 
 namespace App\Core\Module\Config\Internal\Parsers;
 
+use App\Core\Module\Config\Contracts\ConfigParserInterface;
 use RuntimeException;
 
-class PhpArrayParser
+class PhpArrayParser implements ConfigParserInterface
 {
     public function parse(string $filePath): array
     {

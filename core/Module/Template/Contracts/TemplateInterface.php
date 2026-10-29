@@ -24,19 +24,19 @@ interface TemplateInterface
      * Отрендерить шаблон в строку. $template — имя без расширения ('errors/404').
      * $scope — SCOPE_CORE или SCOPE_APP; для APP используется текущая тема сайта.
      */
-    public function render(string $template, array $data = [], string $scope = self::SCOPE_APP): string;
+    public function render(string $template, array $data, string $scope): string;
 
     /** Рендер ядрового шаблона (сокращение для Error/Installer/Admin). */
-    public function renderCore(string $template, array $data = []): string;
+    public function renderCore(string $template, array $data): string;
 
     /** Отрендерить строковый шаблон (для писем и т.п.). */
-    public function renderString(string $contents, array $data = []): string;
+    public function renderString(string $contents, array $data): string;
 
     /** Глобальная переменная, доступная во всех шаблонах. */
     public function share(string $key, mixed $value): void;
 
     /** Шаблон существует? */
-    public function exists(string $template, string $scope = self::SCOPE_APP): bool;
+    public function exists(string $template, string $scope): bool;
 
     /**
      * Активировать тему пользовательского сайта (мультисайт).

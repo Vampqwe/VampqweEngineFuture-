@@ -8,7 +8,7 @@ interface ConfigRepositoryInterface
     /**
      * Получить значение по «точечному» ключу: app.name, modules.Config.critical и т.д.
      */
-    public function get(string $key, mixed $default = null): mixed;
+    public function get(string $key, mixed $default): mixed;
 
     /**
      * Проверить наличие ключа.
@@ -23,5 +23,5 @@ interface ConfigRepositoryInterface
     /**
      * Весь массив конфигурации заданного файла (или всего конфига без аргумента).
      */
-    public function all(?string $group = null): array;
+    public function all(?string $group): array;
 }

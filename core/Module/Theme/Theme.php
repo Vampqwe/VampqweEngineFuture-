@@ -97,6 +97,25 @@ final class Theme implements ThemeInterface
         return $this->registry->register($domain, $theme, $title);
     }
 
+    /**
+     * Идемпотентная само-регистрация идентичности экземпляра в реестре
+     * (концепция «один запуск = один сайт»): если домен уже зарегистрирован —
+     * ничего не делаем (не перетираем тему/заголовок, выбранные админом).
+     * Возвращает true, если запись есть/создана; false при недоступной БД.
+     */
+    public function ensureSite(string $domain, string $theme, string $title = ''): bool
+    {
+        $domain = strtolower(trim($domain));
+        if ($domain === '') {
+            return false;
+        }
+        if ($this->registry->hasDomain($domain)) {
+            return true;
+        }
+
+        return $this->registry->register($domain, $theme, $title);
+    }
+
     public function use(string $theme): void
     {
         $this->current = $theme;

@@ -3,8 +3,15 @@ declare(strict_types=1);
 
 namespace App\Core\System\Support;
 
+use App\Core\System\Enums\AppState;
+
 /**
  * ЕДИНСТВЕННЫЙ разрешённый хардкод рендеринга (осознанное исключение из п.2 Конституции).
+ *
+ * @constitution-exception п.2 — рендер фатальной страницы ДО инициализации
+ * ядра намеренно не имеет зависимостей (контейнера нет); BASE_PATH здесь —
+ * единственный bootstrap-потребитель путей вне контейнера (записан в белый
+ * список R8 линтера, аннотация обязательна).
  *
  * Эта страница печатается, когда движок упал ДО инициализации ядра:
  *   — нет vendor/autoload.php (composer install не выполнен);
@@ -119,18 +126,24 @@ final class FatalPage
         return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
     }
 
-    /** Состояние движка по флагам — без контейнера, читаем Paths напрямую. */
+    /**
+     * Состояние движка по флагам — без контейнера (упал до boot): единый
+     * резолвер AppState::detect() (п.10 — одна реализация детекта, Kernel
+     * вызывает ту же). Имена маркеров живут только в AppState::flagNames().
+     */
     private static function engineState(): string
     {
         try {
-            $paths = new Paths(BASE_PATH);
-            $storage = $paths->get('storage');
-            foreach (['installed' => 'установлен', 'installing' => 'установка', 'maintenance' => 'ТО', 'upgrading' => 'обновление'] as $flag => $label) {
-                if (is_file($storage . '/.' . $flag)) {
-                    return $label;
-                }
-            }
-            return 'не установлен';
+            $state = AppState::detect((new Paths(BASE_PATH))->get('storage'));
+
+            return match ($state) {
+                AppState::Running      => 'установлен',
+                AppState::Installing   => 'установка',
+                AppState::Upgrading    => 'обновление',
+                AppState::Maintenance  => 'ТО',
+                AppState::Error        => 'ошибка',
+                AppState::NotInstalled => 'не установлен',
+            };
         } catch (\Throwable) {
             return 'неизвестно';
         }

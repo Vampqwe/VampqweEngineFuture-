@@ -70,10 +70,40 @@ class Container implements ContainerInterface
         throw new \RuntimeException("Сервис [{$abstract}] не найден в контейнере.");
     }
 
+    public function tryGet(string $abstract): mixed
+    {
+        // Только ЯВНАЯ регистрация (instance/bind). Никакого autowire:
+        // опциональный резолв capability не должен случайно «собирать»
+        // произвольные классы — отсутствие = null, честно и предсказуемо.
+        if (array_key_exists($abstract, $this->instances)) {
+            return $this->instances[$abstract];
+        }
+
+        return isset($this->bindings[$abstract]) ? $this->get($abstract) : null;
+    }
+
+    /**
+     * Есть ли УЖЕ созданная регистрация (instance/bind) без побочных эффектов.
+     * ВАЖНО: has() НЕ автозагружает класс — это чисто реестр контейнера.
+     * capability-проверки ядра («модуль зарегистрирован?») опираются на это:
+     * несуществующий FQN даёт false, а не фатал автозагрузки (п.1 Kernel).
+     */
     public function has(string $abstract): bool
     {
         return array_key_exists($abstract, $this->instances)
             || isset($this->bindings[$abstract]);
+    }
+
+    /**
+     * Автономный резолв класса через конструктор — БЕЗ записи в реестр.
+     * Нужен App для сервис-провайдеров из манифеста: провайдер — системная
+     * доверенная запись конфигурации (не capability), его конкретный класс
+     * легально назван в config/modules.php; в реестре после register()
+     * остаются только контракты модулей (п.2).
+     */
+    public function build(string $class): object
+    {
+        return $this->autowire($class);
     }
 
     /**

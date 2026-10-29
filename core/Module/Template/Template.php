@@ -159,6 +159,59 @@ final class Template implements TemplateInterface
     /** Скомпилировать (с дисковым кэшем) и выполнить файл шаблона. */
     private function renderFile(string $file, array $data): string
     {
+        $compiled = $this->compileFileToPhp($file);
+
+        // Ядро шаблонов резолвит @include/@extends относительно того же корня,
+        // из которого пришёл файл (core-шаблоны include-ят core, app — app).
+        $inCore = str_starts_with(realpath($file) ?: $file, (string) realpath($this->coreViewPath));
+        $this->locatingCore = $inCore;
+
+        try {
+            $env = $this->environment(function (string $name, array $extra) use ($inCore, $data, &$env): string {
+                // @include partial-а: вложенный рендер исполняется в ДОЧЕРНЕМ env,
+                // который наследует секции родителя (иначе partial «съедает»
+                // контент layout-а — баг пустых страниц установщика).
+                $merged   = array_merge($data, $extra);
+                $partial  = $this->locateByName($name, $inCore);
+                $childEnv = $env->childEnv();
+
+                return $childEnv->render($this->compileFileToPhp($partial), $merged);
+            });
+
+            return $env->render($compiled, $data);
+        } finally {
+            $this->locatingCore = false;
+        }
+    }
+
+    /** Резолв имени шаблона в абсолютный путь файла по разделу core/app. */
+    private function locateByName(string $name, bool $inCore): string
+    {
+        $name = $this->compiler->normalizeName($name);
+
+        if ($inCore) {
+            $file = $this->coreViewPath . '/' . $name . '.phtml';
+            if (!is_file($file)) {
+                throw new RuntimeException("Шаблон ядра [{$name}] не найден: {$file}");
+            }
+
+            return $file;
+        }
+
+        $file = $this->locateInApp($name);
+        if ($file === null) {
+            throw new RuntimeException(sprintf(
+                'Шаблон [%s] не найден в теме "%s" (view/app/%s/) и в fallback-теме "%s".',
+                $name, $this->theme, $this->theme, self::DEFAULT_THEME
+            ));
+        }
+
+        return $file;
+    }
+
+    /** Компиляция файла шаблона в PHP-код с инвалидацией кэша по mtime. */
+    private function compileFileToPhp(string $file): string
+    {
         $compiled = $this->cache->get($file);
         if ($compiled === null) {
             $source = file_get_contents($file);
@@ -169,24 +222,22 @@ final class Template implements TemplateInterface
             $this->cache->put($file, $compiled);
         }
 
-        // Ядро шаблонов резолвит @include/@extends относительно того же корня,
-        // из которого пришёл файл (core-шаблоны include-ят core, app — app).
-        $inCore = str_starts_with(realpath($file) ?: $file, (string) realpath($this->coreViewPath));
-
-        $env = $this->environment(function (string $name, array $extra) use ($inCore, $data): string {
-            $merged = array_merge($data, $extra);
-            return $inCore
-                ? $this->renderFromRoot($this->coreViewPath, $name, $merged)
-                : $this->render($name, $merged, self::SCOPE_APP);
-        });
-
-        return $env->render($compiled, $data);
+        return $compiled;
     }
 
     private function environment(callable $nameRenderer): TemplateEnvironment
     {
         $env = new TemplateEnvironment($this->compiler, $this->escaper, $nameRenderer);
         $env->share($this->shared);
+        // Layout (@extends) рендерится ВНУТРИ env — ему нужны резолвер имени
+        // и компилятор файла (без создания нового окружения, чтобы секции
+        // дочернего шаблона дожили до @yield в layout).
+        $env->setFileLocator(fn(string $name): string => $this->locateByName($name, $this->locatingCore));
+        $env->setCompileFile(fn(string $file): string => $this->compileFileToPhp($file));
+
         return $env;
     }
+
+    /** Флаг активного раздела внешнего рендера (core=true / app=false). */
+    private bool $locatingCore = false;
 }

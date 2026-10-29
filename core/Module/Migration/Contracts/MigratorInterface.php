@@ -26,13 +26,13 @@ interface MigratorInterface
      * Каждая миграция выполняется в отдельной транзакции.
      * @return list<string> id применённых на этом вызове миграций
      */
-    public function migrate(?string $id = null): array;
+    public function migrate(?string $id): array;
 
     /**
      * Откатить последнюю применённую (или конкретную по id) миграцию.
      * @return string|null id откаченной миграции (null — откатывать нечего)
      */
-    public function rollback(?string $id = null): ?string;
+    public function rollback(?string $id): ?string;
 
     /** Создать файл-заготовку новой миграции. @return string путь к созданному файлу */
     public function make(string $name): string;

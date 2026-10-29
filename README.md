@@ -52,12 +52,12 @@
 
 ---
 
-## 🎨 Правила стиля (проверено по факту: 129/129 файлов)
+## 🎨 Правила стиля (проверено по факту: 168/168 файлов)
 
-Фактическая проверка репозитория: **все 129 PHP-файлов** (core, app, tests, config, public, bin)
+Фактическая проверка репозитория: **все 168 PHP-файлов** (core, app, tests, config, public, migrations)
 содержат `declare(strict_types=1)`. Это инвариант, а не рекомендация.
 
-1. `declare(strict_types=1)` — **первая строка после `<?php` в каждом файле без исключений** (129/129 ✓).
+1. `declare(strict_types=1)` — **первая строка после `<?php` в каждом файле без исключений** (168/168 ✓).
 2. PSR-4: `App\Core\` → `core/`, `App\` → `app/`, `Tests\` → `tests/`; регистр namespace совпадает с регистром директорий.
 3. Только современные фичи PHP 8.1+: enums, readonly-свойства, match, named arguments, first-class callable syntax.
 4. Подробные PHPDoc на русском у каждого класса/контракта со ссылкой на пункт Конституции (`п.N Конституции`), где это применимо.
@@ -75,9 +75,9 @@
 ├── core/
 │   ├── System/      ← ядро: App, Container, Http (Kernel, Request, Response, Middleware),
 │   │                   Support (Paths, Router, EnvLoader, SuperAdmin, FatalPage), Enums (AppState)
-│   └── Module/      ← 19 модулей ядра: FileSystem, Parser, ArrayHelper, Hook, Config, Logger,
+│   └── Module/      ← 21 модуль ядра: FileSystem, Parser, ArrayHelper, Hook, Config, Logger,
 │   │                   TimeDate, Exception, Error, Cache, Database, Security, Session, Template,
-│   │                   Queue, Migration, Theme, Doctor, Installer
+│   │                   Queue, Migration, Theme, Doctor, Installer, Admin, Assets
 ├── app/modules/     ← пользовательские модули (Pages, Auth, …) — тот же канон Contracts/Internal
 ├── config/          ← app.php, modules.php (манифест модулей, п.6)
 ├── view/            ← core_view (ошибки/установщик/админка) и app_view (темы мультисайта)
@@ -85,7 +85,9 @@
 ├── logs/            ← логи по каналам: logs/<дата>/<Модуль>.log
 ├── database/        ← SQL-дампы схемы (db.sql)
 ├── migrations/      ← версии схемы БД (<ГГГГ_ММ_ДД_HHMMSS>_имя.php)
-├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme)
+├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T4, SecretLeakCheck) + Integration (SiteIdentityHttp — php -S стенд, матрица strict/мягкий/legacy)
+├── docs/            ← CONSTITUTION.md — реестр «правило → чем проверяется» (Теорема синхронизации)
+├── .github/workflows/ci.yml ← merge-gate: lint-rules ∧ test ∧ doctor (sqlite-стенд из .env.example)
 ├── bin/             ← CLI: php bin/engine doctor | migrate | sites | site:add | test | lint-rules
 └── vendor/          ← только composer-автозагрузчик (никаких сторонних пакетов)
 ```
@@ -94,6 +96,17 @@
 
 - CLI: `php bin/engine doctor` — PHP, autoload, `.env`, права `storage/`, загрузка всех модулей ядра, регистрация путей (п.7), состояние.
 - HTTP: `GET /system/health` — JSON-вердикт; доступен даже в режиме обслуживания.
+- CI merge-gate (`.github/workflows/ci.yml`): `lint-rules ∧ test ∧ doctor` на PHP 8.1/8.3; для doctor собирается детерминированный sqlite-стенд из `.env.example` (`DB_DRIVER=sqlite`, `DB_SQLITE_ENABLED=true`, `DB_DATABASE_PATH=engine.sqlite`) — без реальных СУБД и секретов.
+
+## ⚖️ Теорема синхронизации
+
+> `lint-rules exit 0` **∧** `test exit 0` ⇒ код соответствует Конституции (п.1–п.10).
+
+Реестр доказательств «правило → линтер R1–R11 / тест T1–T4» и легальные исключения
+(аннотации `@constitution-exception`) — в [`docs/CONSTITUTION.md`](docs/CONSTITUTION.md);
+формулировка теоремы продублирована в PHPDoc `ArchitectureLinter`. Нарушение, которое
+не ловится ни одной проверкой, считается слепым пятном теоремы и закрывается новым
+правилом или тестом — не аннотацией.
 
 ## 🚀 Быстрый старт
 
@@ -105,9 +118,41 @@ php -S localhost:8000 -t public public/router.php
 
 Windows: `start-dev.ps1` (уже передаёт router-скрипт) или `init.ps1` для первичной подготовки.
 
-## 🌐 Мультисайт (тема по домену)
+**Первый запуск:** откройте `/install` и пройдите мастер (на шаге «Настройки» задаётся пароль супер-администратора — от 8 символов; он пишется в `.env` как argon2id-хеш `SUPER_ADMIN_HASH`, сам пароль нигде не хранится). После `ВЕРДИКТ: готово` движок переходит в состояние Running.
 
-Один движок обслуживает несколько сайтов: домен запроса резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/_starter` (движок не падает).
+## 🔐 Панель администратора (`/admin`)
+
+Системная дорога ядра (модуль `Admin`, зарегистрирован в Kernel как `/admin` и `/admin/{tail*}`). Вход и доступ:
+
+| Маршрут | Назначение |
+|---|---|
+| `GET/POST /admin/login` | форма входа (CSRF-защищена); логин — email пользователя **или** `SuperAdmin` |
+| `GET /admin/logout` | выход из панели (метки допуска снимаются, пользовательский вход Auth не трогается) |
+| `GET /admin` | дашборд + разделы (Dashboard, Users, Pages, System) |
+| `GET /admin/<section>` | раздел; расширение — хук `admin.sections` (п.4), новые разделы без правки ядра |
+
+Допуск (`AdminGuard`, проверка **до** маршрутизации по разделам — обойти маршрутом невозможно):
+- **SuperAdmin** (п.8, зашит в ядро `Support\SuperAdmin`) — имя фиксировано, пароль проверяется по `SUPER_ADMIN_HASH` из `.env`; вход ставит серверную метку `super_admin_verified`;
+- пользователь из таблицы `users` с ролью `admin` или `super_administrator` — по сессионному ключу `auth_user_id` (тот же механизм входа, что у модуля Auth — второго не существует);
+- гость → редирект на `/admin/login`; залогиненный без роли → честная 403.
+
+⚠️ Если в `.env` `SUPER_ADMIN_HASH` пуст (установка не завершена или флаг сброшен), вход невозможен — достаточно пройти `/install` заново: существующий `APP_KEY` не перетирается, хеш будет записан.
+
+## 🌐 Мультисайт (тема по домену) и идентичность сайта
+
+**Идентичность экземпляра** — концепция «один запуск = один сайт» задаётся в `.env`:
+`BASE_URL_SITE=https://vampqwe.ru` (канонический URL; домен извлекается автоматически,
+явный `SITE_DOMAIN` перебивает — для reverse-proxy), `SITE_STRICT_HOST=true` — чужой
+Host получает 404 вместо обслуживания; при пустом `BASE_URL_SITE` включается легаси-резолв
+по заголовку Host (обратная совместимость). Новый домен само-регистрируется в реестре
+(`Theme::ensureSite`, идемпотентно — не перетирает тему/заголовок, выбранные админом).
+Второй сайт = второй экземпляр движка со своим `.env`.
+
+Домен резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/_starter` (движок не падает).
+
+Матрица строгости (strict / мягкий / legacy) автоматизирована интеграционным HTTP-контуром:
+`tests/Integration/SiteIdentityHttpTest.php` поднимает встроенный сервер PHP из тест-раннера
+(`Tests\Framework\HttpServer`) на изолированном стенде с реальными Host-заголовками.
 
 ```bash
 php bin/engine migrate                      # создаёт таблицу engine_sites

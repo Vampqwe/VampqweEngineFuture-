@@ -6,6 +6,7 @@ namespace App\Core\Module\Session;
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
 use App\Core\Module\Session\Contracts\SessionInterface;
+use App\Core\Module\Session\Contracts\SessionStoreMigratorInterface;
 use App\Core\Module\Session\Internal\Cookie;
 use App\Core\Module\Session\Internal\Crypto;
 use App\Core\System\Support\SessionStoreInterface;
@@ -23,7 +24,7 @@ use DateTimeImmutable;
  * не «выкидывает» пользователей. Если redis недоступен (нет ext/сервера) —
  * прозрачная деградация на file-стор.
  */
-final class ModuleSession implements SessionInterface
+final class ModuleSession implements SessionInterface, SessionStoreMigratorInterface
 {
     private string $id = '';
     /** @var array<string,mixed> */
@@ -59,6 +60,21 @@ final class ModuleSession implements SessionInterface
         $this->dirty  = true;
 
         return $this->id;
+    }
+
+    public function startPreservingCsrf(): string
+    {
+        $this->ensureLoaded();
+        $csrf = $this->get('_csrf', null);
+        $csrf = is_string($csrf) && strlen($csrf) >= 32 ? $csrf : null;
+
+        $newId = $this->start(); // новый id, старая запись уничтожена, data очищены
+
+        if ($csrf !== null) {
+            $this->set('_csrf', $csrf); // токен переживает ротацию — формы не «протухают» на 419
+        }
+
+        return $newId;
     }
 
     public function get(string $key, mixed $default = null): mixed

@@ -10,13 +10,13 @@ namespace App\modules\Pages\Contracts;
 interface PageRepositoryInterface
 {
     /** @return array<int, array<string, mixed>> пагинированный список опубликованных страниц */
-    public function listPublished(int $page = 1, int $perPage = 20): array;
+    public function listPublished(int $page, int $perPage): array;
 
     /** Найти страницу по ЧПУ-слагу (только published). null если нет. */
     public function findBySlug(string $slug): ?array;
 
     /** Создать страницу, вернуть её id. slug генерируется из title, если не передан. */
-    public function create(string $title, string $content, ?string $slug = null, bool $published = false): int;
+    public function create(string $title, string $content, ?string $slug, bool $published): int;
 
     /** Обновить существующую страницу. false — если id не найден. */
     public function update(int $id, array $fields): bool;
@@ -25,5 +25,5 @@ interface PageRepositoryInterface
     public function delete(int $id): bool;
 
     /** Свободен ли слаг (для валидации при создании/переименовании). */
-    public function isSlugFree(string $slug, ?int $exceptId = null): bool;
+    public function isSlugFree(string $slug, ?int $exceptId): bool;
 }

@@ -13,6 +13,7 @@ use App\Core\Module\Installer\Internal\Steps\CreateEnvStep;
 use App\Core\Module\Logger\Contracts\LoggerInterface;
 use App\Core\Module\Migration\Contracts\MigratorInterface;
 use App\Core\Module\Security\Contracts\SecurityInterface;
+use App\Core\System\Enums\AppState;
 use App\Core\System\Support\SuperAdmin;
 use Throwable;
 
@@ -31,12 +32,21 @@ use Throwable;
  */
 final class Installer implements InstallerInterface, InstallerPageInterface
 {
-    private const FLAG_INSTALLED  = '.installed';
-    private const FLAG_INSTALLING = '.installing';
+    /**
+     * Путь флага состояния — единый резолвер AppState::marker() (п.7/п.10:
+     * имена маркеров живут только в AppState::flagNames(), здесь их нет).
+     */
+    private function flagPath(AppState $state): string
+    {
+        return $state->marker($this->storagePath);
+    }
 
     public function __construct(
-        private readonly string $basePath,
         private readonly string $storagePath,
+        // .env проекта — из Paths::MAP ('env'), провайдер передаёт env_path (п.7).
+        private readonly string $envPath,
+        // Каталог логов — из Paths::MAP ('logs'); fallback на storage, если не задан.
+        private readonly string $logsPath,
         private readonly FileSystemInterface $fs,
         private readonly SecurityInterface $security,
         private readonly ConfigRepositoryInterface $config,
@@ -83,7 +93,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
      */
     public function install(array $options = []): array|bool
     {
-        $flagFile = $this->storagePath . '/' . self::FLAG_INSTALLING;
+        $flagFile = $this->flagPath(AppState::Installing);
         $this->fs->createFile($flagFile);
         $summary = [];
 
@@ -100,7 +110,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             $adminHash = $this->security->hashPassword($password);
             unset($password);
 
-            (new CreateEnvStep($this->fs))->handle($this->basePath . '/.env', [
+            (new CreateEnvStep($this->fs))->handle($this->envPath, [
                 'APP_NAME'     => $this->sanitizeName((string) ($options['app_name'] ?? 'VampqweEngineFuture')),
                 'APP_DEBUG'    => (bool) ($options['debug'] ?? false) ? 'true' : 'false',
                 'APP_KEY'      => $key,
@@ -110,7 +120,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             ]);
 
             // Флаг готовности — AppState::Running определяется по нему
-            $this->fs->createFile($this->storagePath . '/' . self::FLAG_INSTALLED);
+            $this->fs->createFile($this->flagPath(AppState::Running));
 
             // Database-шаг: создаём БД (если активный драйвер включён и доступен)
             // и прогоняем схему database/db.sql. Недоступная СУБД НЕ валит установку —
@@ -123,7 +133,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
             // Флаг .installed ставим ТОЛЬКО после успешной схемы. Иначе при недоступной
             // СУБД движок считался бы установленным с пустой базой (рассинхрон состояний).
             if ($this->isSchemaFailure($summary['schema'] ?? '')) {
-                $this->fs->delete($this->storagePath . '/' . self::FLAG_INSTALLED);
+                $this->fs->delete($this->flagPath(AppState::Running));
 
                 return false;
             }
@@ -144,12 +154,12 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
     public function isInstalling(): bool
     {
-        return $this->fs->isFile($this->storagePath . '/' . self::FLAG_INSTALLING);
+        return $this->fs->isFile($this->flagPath(AppState::Installing));
     }
 
     public function isInstalled(): bool
     {
-        return $this->fs->isFile($this->storagePath . '/' . self::FLAG_INSTALLED);
+        return $this->fs->isFile($this->flagPath(AppState::Running));
     }
 
     // ==================== InstallerPageInterface ====================
@@ -330,7 +340,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
 
     private function currentAppKey(): ?string
     {
-        $envFile = $this->basePath . '/.env';
+        $envFile = $this->envPath;
         if (!$this->fs->isFile($envFile)) {
             return isset($_ENV['APP_KEY']) ? (string) $_ENV['APP_KEY'] : null;
         }
@@ -343,8 +353,13 @@ final class Installer implements InstallerInterface, InstallerPageInterface
         return null;
     }
 
-    /** Валидация POST-настроек; пустой массив — всё корректно. */
-    public static function validateSettings(array $post): array
+    /**
+     * Валидация POST-настроек; пустой массив — всё корректно.
+     * НЕ static: контракт InstallerInterface объявляет метод экземпляром
+     * (PHP запрещает сужать не-static метода контракта до static), а чистая
+     * валидация данных — свойство хорошей абстракции, не компромисс.
+     */
+    public function validateSettings(array $post): array
     {
         $errors = [];
 
@@ -380,7 +395,7 @@ final class Installer implements InstallerInterface, InstallerPageInterface
     {
         $p = $this->config->get('paths.logs');
 
-        return is_string($p) && $p !== '' ? $p : $this->basePath . DIRECTORY_SEPARATOR . 'logs';
+        return is_string($p) && $p !== '' ? $p : $this->logsPath;
     }
 
     /** Установка считается неудачной, если схема не была развёрнута (СУБД/дамп недоступны). */

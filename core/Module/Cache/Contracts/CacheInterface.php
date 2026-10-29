@@ -10,10 +10,10 @@ namespace App\Core\Module\Cache\Contracts;
 interface CacheInterface
 {
     /** Получить значение по ключу; null если нет или истёк TTL. */
-    public function get(string $key, mixed $default = null): mixed;
+    public function get(string $key, mixed $default): mixed;
 
     /** Записать значение на $ttl секунд (0 = бессрочно). */
-    public function set(string $key, mixed $value, int $ttl = 0): bool;
+    public function set(string $key, mixed $value, int $ttl): bool;
 
     /** Есть ли ключ (и не истёк ли). */
     public function has(string $key): bool;
@@ -25,10 +25,10 @@ interface CacheInterface
     public function flush(): bool;
 
     /** Атомарно увеличить значение-целое на $by (false — если ключа нет). */
-    public function inc(string $key, int $by = 1): int|false;
+    public function inc(string $key, int $by): int|false;
 
     /** Атомарно уменьшить значение-целое на $by (false — если ключа нет). */
-    public function dec(string $key, int $by = 1): int|false;
+    public function dec(string $key, int $by): int|false;
 
     /** Получить или вычислить и закешировать (callback-мемоизация). */
     public function remember(string $key, int $ttl, callable $callback): mixed;

@@ -5,6 +5,7 @@ namespace App\Core\Module\Doctor;
 
 use App\Core\Module\Config\Contracts\ConfigRepositoryInterface;
 use App\Core\Module\Doctor\Checks\ModulePresenceCheck;
+use App\Core\Module\Doctor\Checks\SecretLeakCheck;
 use App\Core\Module\Doctor\Contracts\DoctorInterface;
 use App\Core\System\Container\Contracts\ContainerInterface;
 
@@ -94,6 +95,10 @@ final class Doctor implements DoctorInterface
                 );
             }
         }
+
+        // 4) Секреты не утекли в git (п.8/п.9): .env в ignore, значения ключей
+        // APP_KEY/DB_PASSWORD отсутствуют в индексе. Корень — из base_path (п.7).
+        $results[] = SecretLeakCheck::run((string) $this->container->get('base_path'));
 
         return $results;
     }

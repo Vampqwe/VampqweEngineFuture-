@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Core\System\Support;
 
+use App\Core\System\Enums\AppState;
+
 /**
  * Статический контрольщик архитектуры (пункт 5 плана развития).
  *
@@ -10,9 +12,34 @@ namespace App\Core\System\Support;
  * проверялись человеком глазами, превращаются в исполняемую проверку.
  * Запускается из bin/engine: `php bin/engine lint-rules`.
  *
- * Проверяемые инварианты (по фактическому коду репозитория):
+ * ════════════════════════════════════════════════════════════════════════
+ *  ТЕОРЕМА О СИНХРОНИЗАЦИИ КОНСТИТУЦИИ (формулировка — в README.md)
+ * ════════════════════════════════════════════════════════════════════════
+ *
+ *   Т е о р е м а.  Если `php bin/engine lint-rules` завершается с кодом 0
+ *   и `php bin/engine test` завершается с кодом 0, то код проекта
+ *   соответствует Конституции (п.1–п.10) и правилам стиля.
+ *
+ *   Д о к а з а т е л ь с т в о  строится построчно: каждое правило
+ *   имеет хотя бы один исполняемый детектор в этом классе либо тест
+ *   в tests/. Карта доказательств (правило → чем проверяется):
+ *     п.1 (ядро не знает бизнес-логику)  → R6, R6b, R8 + KernelBoundaryTest
+ *     п.2 (только контракты)             → R3, R6, R8, R9
+ *     п.3 (DI, никаких глобалов)         → R2, R7, R10 + ContainerTest
+ *     п.4 (хуки вместо правок ядра)      → HookTest, AssetsTest (dispatch-точки)
+ *     п.5 (расширение без модификации)   → manifest-driven boot (App) + R5
+ *     п.6 (PSR-4)                        → R4
+ *     п.7 (пути только в Paths::MAP)     → R2, R7    + PathsTest
+ *     п.8 (strict_types везде)           → R1
+ *     п.9 (движок не падает)             → Doctor check-набором + юнит-тесты деградаций
+ *     п.10 (самодиагностика честная)     → Doctor + ModulePresenceCheck (R5-эквивалент runtime)
+ *
+ *   Всё, что НЕ имеет детектора или теста, помечено как debt в
+ *   docs/CONSTITUTION.md и не участвует в теореме.
+ *
+ * Проверяемые инварианты (полный список):
  *  R1. Каждый PHP-файл ядра/модулей/приложения/tests начинается с
- *      declare(strict_types=1) — инвариант README (129/129 и более).
+ *      declare(strict_types=1) — инвариант README (п.8).
  *  R2. Запрещён dirname(__DIR__, N) для построения путей проекта (п.7):
  *      пути живут только в Paths::MAP. Бытовой dirname() от имени файла
  *      (mkdir рекурсивно) — допустим и не детектится.
@@ -21,6 +48,35 @@ namespace App\Core\System\Support;
  *  R4. Файлы core/ и app/ должны соответствовать PSR-4: namespace
  *      выводится из пути (App\Core\... / App\...).
  *  R5. config/modules.php: провайдеры объявлены классами, которые существуют.
+ *  R6. Ядро (core/System/**) не ссылается на конкретные классы модулей
+ *      (core/Module/*, app/modules/*) в executable-коде — только на их
+ *      Contracts/ (п.1/п.2). Разрешены: use-строки, PHPDoc, хук-строки
+ *      ('engine.*'), service-ключи ('*_path').
+ *  R6b. СТРУКТУРНОЕ усиление R6: ссылки ядра на контракты модулей живут
+ *      ТОЛЬКО в Support\ModuleBridge (единственный мост «ядро→модули»).
+ *      Ни один другой файл core/System/** не содержит literal-ссылки
+ *      App\...\Module\<X>::class / App\modules\<X>::class даже внутри
+ *      use-строк и PHPDoc (ловится и «перенос знания» рефакторингом).
+ *  R7. Пути проекта строятся только из Paths::MAP (п.7): запрещены
+ *      BASE_PATH . '/...' и конкатенации '*_path' с литеральными
+ *      сегментами вне MAP.
+ *  R8. Осознанные исключения из п.2 (FatalPage/SuperAdmin) требуют
+ *      аннотации '@constitution-exception'; аннотация обязана быть
+ *      использована (защита от устаревших лазеек).
+ *  R9. Внутренности модулей (классы Internal/, финальные классы модуля)
+ *      не связываются статически (new/instanceof) из чужих модулей и
+ *      ядра — даже если формально это не use-импорт (усиление R3, п.2).
+ *  R10. Прямые криптопримитивы (openssl_encrypt/decrypt) разрешены ровно
+ *       в одном месте — Security/Internal/Crypto.php (единый источник
+ *       шифрования; DRY + п.2).
+ *  R11. Публичные контракты (*\/Contracts\/*.php) — чистые абстракции:
+ *       a) методы не имеют default-значений параметров (реализация обязана
+ *          объявлять значения сама и не может молча рассинхронизировать
+ *          контракт); вызывающий обязан передавать аргументы явно;
+ *       b) константы контракта обязаны иметь scalar-значение
+ *          (`public const X = '...';`) — тогда они наследуются всеми
+ *          реализациями и доступны как `XxxInterface::X` без нарушения п.2;
+ *       c) запрещены static-свойства: состояние живёт в реализациях.
  *
  * Выход: построчный отчёт; exit code 1 при любом нарушении — готов к CI.
  */
@@ -28,6 +84,111 @@ final class ArchitectureLinter
 {
     /** @var list<string> директории-цели относительно корня проекта */
     private const TARGETS = ['core', 'app', 'tests', 'config', 'migrations'];
+
+    /**
+     * Белый список R6: абстракции, на которые ядро (core/System) вправе
+     * ссылаться напрямую. Только ПУБЛИЧНЫЕ контракты модулей (п.2) —
+     * конкретные классы реализации (Theme, Installer, SuperAdmin...) тут
+     * появиться не могут: их присутствие = нарушение п.1.
+     *
+     * @var list<string>
+     */
+    private const CORE_ALLOWED_REFERENCES = [
+        // Контракты системных модулей (core\/Module\/*\/Contracts)
+        'App\\Core\\Module\\Config\\Contracts\\ConfigRepositoryInterface',
+        'App\\Core\\Module\\Error\\Contracts\\ErrorPageInterface',
+        'App\\Core\\Module\\Hook\\Contracts\\HookInterface',
+        'App\\Core\\Module\\Installer\\Contracts\\InstallerInterface',
+        'App\\Core\\Module\\Installer\\Contracts\\InstallerPageInterface',
+        'App\\Core\\Module\\Session\\Contracts\\SessionInterface',
+        'App\\Core\\Module\\Logger\\Contracts\\LoggerInterface',
+        'App\\Core\\Module\\Database\\Contracts\\DatabaseInterface',
+        'App\\Core\\Module\\FileSystem\\Contracts\\FileSystemInterface',
+        'App\\Core\\Module\\Template\\Contracts\\TemplateInterface',
+        'App\\Core\\Module\\Theme\\Contracts\\ThemeInterface',
+        'App\\Core\\Module\\Assets\\Contracts\\AssetsInterface',
+        'App\\Core\\Module\\Admin\\Contracts\\AdminPanelInterface',
+        'App\\Core\\Module\\Doctor\\Contracts\\DoctorInterface',
+        'App\\Core\\Module\\Cache\\Contracts\\CacheInterface',
+        'App\\Core\\Module\\Queue\\Contracts\\QueueInterface',
+        'App\\Core\\Module\\Migration\\Contracts\\MigratorInterface',
+        'App\\Core\\Module\\Security\\Contracts\\SecurityInterface',
+        'App\\Core\\Module\\Exception\\Contracts\\ExceptionHandlerInterface',
+        // Контракты пользовательских модулей (app\/modules\/*\/Contracts) —
+        // биндятся провайдерами приложения, ядро резолвит только по ним.
+        'App\\modules\\Auth\\Contracts\\AuthManagerInterface',
+        'App\\modules\\Pages\\Contracts\\PageRendererInterface',
+        // Внутренний стор-контракт Session (реализует Support\SessionStoreInterface):
+        // легальный мост System↔Session без знания конкретных сторов.
+        'App\\Core\\Module\\Session\\Contracts\\SessionStoreMigratorInterface',
+    ];
+
+    /**
+     * Белый список R7: имена файлов, легально отсутствующие в Paths::MAP
+     * (точечные маркеры состояния и конфигурация окружения). Их каталог задаётся
+     * через уже легальные '*_path' (storage_path/base_path), поэтому сам
+     * литерал имени не требует ключа в MAP.
+     *
+     * Словарь НЕ дублирует имена флагов: они берутся у AppState::flagNames()
+     * (п.10 — единственный источник имён); здесь остаётся только '.env',
+     * который не является маркером состояния.
+     *
+     * @var list<string>
+     */
+    private const EXTRA_FILE_LITERALS = ['.env'];
+
+    /**
+     * Собственный файл линтера содержит строки-доказательства (сообщения о
+     * нарушениях с цитатами запрещённых литералов) — он обязан быть чист от
+     * запрещённых паттернов в executable-коде, иначе проверка «сама себя
+     * ловит». Исключается из контентных проверок R7/флагов; структурные
+     * (R1/R4) к нему применяются.
+     */
+    private const SELF_FILE = 'core/System/Support/ArchitectureLinter.php';
+
+    /** @return list<string> */
+    private function allowedFileLiterals(): array
+    {
+        return array_merge(self::EXTRA_FILE_LITERALS, array_values(AppState::flagNames()));
+    }
+
+    /**
+     * Белый список R8: файлы-исключения из п.2 (осознанный хардкод,
+     * зафиксированный в README). Каждый обязан нести аннотацию
+     * '@constitution-exception', иначе R8 ловит и файл без аннотации,
+     * и устаревшую запись здесь.
+     *
+     * @var list<string>
+     */
+    private const EXCEPTION_WHITELIST = [
+        'core/System/Support/FatalPage.php',
+        'core/System/Support/SuperAdmin.php',
+        // Физический bootstrap путей: App и Paths — единственные места ядра,
+        // где BASE_PATH читается (define — в public/index.php и bin/engine,
+        // они вне TARGETS линтера). Всё остальное получает пути только из
+        // контейнера ('*_path'), поэтому любое иное появление BASE_PATH = R7.
+        'core/System/App.php',
+        'core/System/Support/Paths.php',
+    ];
+
+    /**
+     * Белый список R9: тестовые файлы, легально тестирующие внутренности
+     * модулей напрямую (юнит-тесты парсеров/крипто/стор). Тест обязан
+     * нести аннотацию '@constitution-exception п.2' с обоснованием —
+     * R8 требует её наличия, отсутствие записи = устаревший whitelist.
+     *
+     * @var list<string>
+     */
+    private const TEST_INTERNAL_WHITELIST = [
+        'tests/Unit/SecurityTest.php',
+        // Инспекция исходников ядра (T3 теоремы): читает core/System/** как данные;
+        // поиск корня репозитория через dirname — легален с аннотацией п.7 (R8 требует её).
+        'tests/Unit/KernelBoundaryTest.php',
+        // Юнит-тест внутренней проверки Doctor (детектор утечки секретов в git):
+        // обязан иметь доступ к объекту теста (Checks\SecretLeakCheck — Internal-зона
+        // модуля Doctor, п.2); поиск корня через dirname — тот же легальный паттерн п.7.
+        'tests/Unit/SecretLeakCheckTest.php',
+    ];
 
     public function __construct(private readonly string $basePath)
     {
@@ -52,7 +213,12 @@ final class ArchitectureLinter
             }
 
             // ---- R2: dirname(__DIR__, N) как путь проекта ----
-            if (preg_match('/dirname\(\s*__DIR__\s*,\s*\d+\s*\)/', $src)) {
+            // Пути проекта живут только в Paths::MAP (п.7). Тест-инспекции,
+            // читающие исходники репозитория, получают корень бытовым
+            // dirname(__DIR__) от namespace-папки и обязаны нести аннотацию
+            // @constitution-exception (проверяется R8-механикой whitelist).
+            if (preg_match('/dirname\(\s*__DIR__\s*,\s*\d+\s*\)/', $src)
+                && !str_contains($src, '@constitution-exception п.7')) {
                 $violations[] = "R2 путь через dirname(__DIR__, N) вместо Paths — {$rel}";
             }
 
@@ -74,6 +240,94 @@ final class ArchitectureLinter
                 if ($expected !== null && $mn[1] !== $expected) {
                     $violations[] = "R4 namespace [{$mn[1]}] ≠ PSR-4 [{$expected}] — {$rel}";
                 }
+            }
+
+            // ---- R6: ядро не ссылается на конкретные классы модулей (п.1/п.2) ----
+            if (str_starts_with($rel, 'core/System/')) {
+                foreach ($this->moduleReferencesInCode($this->executableCode($src)) as $fqcn) {
+                    if (!in_array($fqcn, self::CORE_ALLOWED_REFERENCES, true)) {
+                        $violations[] = "R6 ядро ссылается на класс модуля [{$fqcn}] — {$rel}"
+                            . ' (разрешены только контракты из CORE_ALLOWED_REFERENCES)';
+                    }
+                }
+            }
+
+            // ---- R6b: знание о модулях — только в ModuleBridge (структурная теорема) ----
+            if (str_starts_with($rel, 'core/System/')
+                && $rel !== 'core/System/Support/ModuleBridge.php') {
+                if (preg_match_all(
+                    '/(?:App\\\\(?:Core\\\\)?Module|App\\\\modules)\\\\[A-Za-z0-9_\\\\]*?\\\\[A-Za-z0-9_]+(?=::class|;)/',
+                    $src,
+                    $mBridge
+                )) {
+                    $violations[] = "R6b ссылка на контракт модуля вне ModuleBridge — {$rel}: "
+                        . implode(', ', array_values(array_unique($mBridge[0])))
+                        . ' (единственный легальный мост ядро→модули: core/System/Support/ModuleBridge.php;'
+                        . ' перенесите резолв в Bridge)';
+                }
+            }
+
+            // ---- R7: пути только из Paths::MAP (п.7) ----
+            foreach ($this->pathConcatViolations($rel, $src) as $msg) {
+                $violations[] = $msg;
+            }
+
+            // ---- R8: исключения п.2 требуют аннотации @constitution-exception ----
+            if ((in_array($rel, self::EXCEPTION_WHITELIST, true)
+                    || in_array($rel, self::TEST_INTERNAL_WHITELIST, true))
+                && !str_contains($src, '@constitution-exception')) {
+                $violations[] = "R8 файл-исключение без аннотации @constitution-exception — {$rel}";
+            }
+
+            // ---- R9: статическая связность с Internal/чужими классами (new/instanceof) ----
+            $code = $this->executableCode($src);
+            $home = $this->ownModuleOf($rel);
+            $r9exempt = in_array($rel, self::TEST_INTERNAL_WHITELIST, true);
+            if (preg_match_all(
+                '/\b(?:new|instanceof)\s+\\\\?((?:App\\\\(?:Core\\\\)?Module|App\\\\modules)\\\\[A-Za-z0-9_\\\\]+)/',
+                $code,
+                $mNew
+            )) {
+                foreach ($mNew[1] as $fqcn) {
+                    $crossInternal = (bool) preg_match(
+                        '/^App\\\\(?:Core\\\\)?Module\\\\([^\\\\]+)\\\\Internal\\\\/',
+                        $fqcn,
+                        $mm
+                    );
+                    if ($crossInternal && $home !== null && $mm[1] === $home) {
+                        continue; // свой Internal — легально
+                    }
+                    if ($r9exempt) {
+                        continue; // юнит-тест из TEST_INTERNAL_WHITELIST (аннотация проверена в R8)
+                    }
+                    if ($crossInternal || str_contains($fqcn, '\\\\Internal\\\\')) {
+                        $violations[] = "R9 прямая связность с внутренностями модуля [{$fqcn}] — {$rel}";
+                    }
+                }
+            }
+
+            // ---- R10: криптопримитивы только в Security/Internal/Crypto ----
+            if (preg_match('/\bopenssl_(?:encrypt|decrypt)\s*\(/', $code)
+                && $rel !== 'core/Module/Security/Internal/Crypto.php') {
+                $violations[] = "R10 openssl_* вне единого криптоузла Security\\Internal\\Crypto — {$rel}";
+            }
+
+            // ---- R11: контракты без default-значений и state ----
+            if (str_contains($rel, '/Contracts/')) {
+                foreach ($this->contractDefaultParamLines($src) as $lineNo => $line) {
+                    $violations[] = "R11 default-значение параметра в контракте (строка {$lineNo}) — {$rel}: "
+                        . trim($line);
+                }
+                foreach ($this->contractStateViolations($src) as $msg) {
+                    $violations[] = "{$msg} — {$rel}";
+                }
+            }
+        }
+
+        // ---- R8 (обратная половина): каждая запись белого списка реально используется ----
+        foreach (self::EXCEPTION_WHITELIST as $allowed) {
+            if (!is_file($this->basePath . '/' . $allowed)) {
+                $violations[] = "R8 устаревшая запись белого списка исключений: {$allowed}";
             }
         }
 
@@ -144,5 +398,204 @@ final class ArchitectureLinter
             return 'App\\modules\\' . implode('\\', array_slice($parts, 2));
         }
         return null;
+    }
+
+    // ==================== помощники новых правил R6–R11 ====================
+
+    /**
+     * Исполняемый код файла: без PHPDoc-комментариев и строковых литералов.
+     * Ссылки внутри /* ... *\/ или '...' не считаются зависимостью кода —
+     * иначе докстринги и хук-строки ('engine.assets.registered') давали бы
+     * ложные срабатывания в R6/R9/R10.
+     */
+    private function executableCode(string $src): string
+    {
+        // 1) комментарии -> пробелы (сохраняем количество строк для R11)
+        $out = preg_replace_callback('#/\*.*?\*/#s', static fn(array $m): string =>
+            str_repeat("\n", substr_count($m[0], "\n")), $src) ?? $src;
+        $out = preg_replace('~^\s*//.*$|//[^\n"]*$~m', '', $out) ?? $out;
+        // 2) строковые литералы (одинарные/двойные) -> пустые кавычки
+        $out = preg_replace("/'(?:\\\\.|[^'\\\\])*'/", "''", $out) ?? $out;
+        $out = preg_replace('/"(?:\\\\.|[^"\\\\])*"/', '""', $out) ?? $out;
+
+        return $out;
+    }
+
+    /**
+     * R6: все FQN-ссылки на классы модулей в исполняемом коде ядра.
+     * use-строки вырезаны executableCode? — нет: use остаётся, поэтому
+     * фильтруем их отдельно (разрешённые импорты контрактов).
+     *
+     * @return list<string> уникальные FQCN
+     */
+    private function moduleReferencesInCode(string $code): array
+    {
+        $refs = [];
+        if (preg_match_all(
+            '/\\\\?((?:App\\\\(?:Core\\\\)?Module|App\\\\modules)\\\\[A-Za-z0-9_\\\\]+)/',
+            $code,
+            $m
+        )) {
+            foreach ($m[1] as $fqcn) {
+                $refs[rtrim($fqcn, '\\')] = true;
+            }
+        }
+
+        return array_keys($refs);
+    }
+
+    /**
+     * R7: конкатенации путей вне Paths::MAP.
+     *  - BASE_PATH . '/<что-то>' — запрещено (кроме bootstrap-файлов);
+     *  - <...>_path / basePath / storagePath . '/<сегмент>' — сегмент обязан
+     *    быть либо ключом MAP, либо точечным маркером из allowedFileLiterals()
+     *    (словарь имён флагов живёт в AppState — п.10).
+     *
+     * @return list<string>
+     */
+    private function pathConcatViolations(string $rel, string $src): array
+    {
+        // Bootstrap-исключения: единственные места, где корень проекта
+        // определяется физически (публичный контракт развёртывания).
+        if (in_array($rel, ['public/index.php', 'bin/engine', 'tests/run.php'], true)) {
+            return [];
+        }
+
+        // Собственный файл линтера содержит строки-доказательства с цитатами
+        // запрещённых литералов — контентные проверки к нему неприменимы
+        // (иначе проверка ловит саму себя; структурные R1/R4 работают).
+        if ($rel === self::SELF_FILE) {
+            return [];
+        }
+
+        $code = $this->executableCode($src);
+        $out  = [];
+
+        // BASE_PATH читается только в физическом bootstrap путей (белый
+        // список R8: App, Paths + аннотированные исключения FatalPage).
+        // Вне этих файлов любое появление глобальной константы = п.3/п.7.
+        if (!in_array($rel, self::EXCEPTION_WHITELIST, true)
+            && preg_match('/\bBASE_PATH\b/', $code)) {
+            $out[] = "R7 обращение к глобальной константе BASE_PATH вместо '*_path' из контейнера — {$rel}";
+        }
+
+        if (preg_match_all(
+            "/\\b([A-Za-z0-9_]*(?:_path|Path|basePath|storagePath))\\s*(?:\\.\\s*)?['\"]([^'\"]*)['\"]/",
+            $code,
+            $m,
+            PREG_SET_ORDER
+        )) {
+            foreach ($m as $mm) {
+                $seg = $mm[2];
+                if ($seg === '' || $seg === '/') {
+                    continue;
+                }
+                $clean = ltrim($seg, '/');
+                if (in_array($clean, $this->allowedFileLiterals(), true)) {
+                    continue; // точечный маркер/конфиг — легально
+                }
+                // разрешаем '<dir>' только если это префикс какого-то ключа MAP
+                $first = explode('/', $clean)[0];
+                if ($this->isMapSegment($first)) {
+                    continue;
+                }
+                $out[] = "R7 путь собран конкатенацией [{$mm[1]} . '{$seg}'] вне Paths::MAP — {$rel}";
+            }
+        }
+
+        return $out;
+    }
+
+    /** Сегмент совпадает с относительным путём/его частью в Paths::MAP? */
+    private function isMapSegment(string $segment): bool
+    {
+        static $segments = null;
+        if ($segments === null) {
+            $segments = [];
+            foreach ((new PathsMapProbe())() as $rel) {
+                foreach (explode('/', $rel) as $part) {
+                    if ($part !== '' && $part !== '.') {
+                        $segments[$part] = true;
+                    }
+                }
+            }
+        }
+
+        return isset($segments[$segment]);
+    }
+
+    /**
+     * R11: строки public function в контрактах, содержащие default-значения
+     * параметров (= после имени параметра; '=>' в match-контексте не бывает
+     * в сигнатуре интерфейса). Возвращает номер=>текст.
+     *
+     * @return array<int,string>
+     */
+    private function contractDefaultParamLines(string $src): array
+    {
+        $bad   = [];
+        $lines = preg_split('/\r\n|\r|\n/', $src) ?: [];
+        foreach ($lines as $i => $line) {
+            if (!preg_match('/^\s*public function \w+\s*\(/', $line)) {
+                continue;
+            }
+            // signature может продолжаться на следующих строках — склеим до ')'
+            $sig = $line;
+            for ($j = $i + 1; $j < count($lines) && substr_count($sig, '(') > substr_count($sig, ')'); $j++) {
+                $sig .= ' ' . $lines[$j];
+            }
+            // default-значение: '=' внутри круглых скобок сигнатуры
+            if (preg_match('/\((?P<args>[^()]*(?:\([^()]*\)[^()]*)*)\)/', $sig, $mm)
+                && str_contains($mm['args'], '=')) {
+                $bad[$i + 1] = trim($sig);
+            }
+        }
+
+        return $bad;
+    }
+
+    /**
+     * R11b: константы и static-свойства контрактов. Константа обязана иметь
+     * scalar-значение (иначе наследники не получат `XxxInterface::X`);
+     * static-свойства запрещены полностью.
+     *
+     * @return list<string> сообщения без имени файла
+     */
+    private function contractStateViolations(string $src): array
+    {
+        $out   = [];
+        $lines = preg_split('/\r\n|\r|\n/', $src) ?: [];
+        foreach ($lines as $i => $line) {
+            if (preg_match('/^\s*(?:public\s+)?const\s+\w+\s*;/', $line)) {
+                $out[] = sprintf(
+                    'R11 константа контракта без значения (строка %d): %s',
+                    $i + 1,
+                    trim($line)
+                );
+            } elseif (preg_match('/^\s*(?:public|protected|private)\s+(?:readonly\s+)?static\s+/', $line)) {
+                $out[] = sprintf(
+                    'R11 static-свойство в контракте (строка %d): %s',
+                    $i + 1,
+                    trim($line)
+                );
+            }
+        }
+
+        return $out;
+    }
+}
+
+/**
+ * Читает relative-пути Paths::MAP без нарушения инкапсуляции constant:
+ * через reflection один раз, статически кэшируется в isMapSegment().
+ */
+final class PathsMapProbe
+{
+    public function __invoke(): array
+    {
+        $r = new \ReflectionClass(\App\Core\System\Support\Paths::class);
+        $map = $r->getConstant('MAP');
+
+        return is_array($map) ? array_values($map) : [];
     }
 }

@@ -13,7 +13,7 @@ interface InstallerPageInterface
     public function requirementsPage(array $checks): string;
 
     /** Шаг 2: форма настроек (имя сайта, часовой пояс, режим отладки). */
-    public function settingsForm(array $errors = []): string;
+    public function settingsForm(array $errors): string;
 
     /** Шаг 3: успешное завершение. */
     public function successPage(array $summary): string;
