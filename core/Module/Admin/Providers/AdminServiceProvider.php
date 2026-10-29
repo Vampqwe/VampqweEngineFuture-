@@ -61,6 +61,10 @@ class AdminServiceProvider implements ModuleProviderInterface
             return new DashboardSection(
                 $c->has(TemplateInterface::class) ? $c->get(TemplateInterface::class) : null,
                 $c->has(DatabaseInterface::class) ? $c->get(DatabaseInterface::class) : null,
+                // контейнер нужен только для опциональной сводки сайта
+                // (идентичность экземпляра + реестр engine_sites); при
+                // недоступных модулях секция честно деградирует (п.9).
+                $c,
             );
         });
 
@@ -82,6 +86,9 @@ class AdminServiceProvider implements ModuleProviderInterface
             return new SystemSection(
                 $c->has(DoctorInterface::class) ? $c->get(DoctorInterface::class) : null,
                 $c->has(TemplateInterface::class) ? $c->get(TemplateInterface::class) : null,
+                // контейнер — для опционального реестра сайтов с бейджем
+                // «этот экземпляр»; при недоступных модулях раздел деградирует (п.9).
+                $c,
             );
         });
 
