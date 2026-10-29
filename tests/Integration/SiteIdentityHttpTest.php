@@ -73,6 +73,33 @@ final class SiteIdentityHttpTest extends TestCase
         $this->assertSame(200, $server->get('/', 'any-host.test')['status'], 'Легаси-режим жив (обратная совместимость).');
     }
 
+    /**
+     * Регрессия «белой страницы с галочкой»: на корректно установленном
+     * стенде главная ОБЯЗАНА отдавать контент стартового сайта engineStart
+     * (гайд по движку), а не голый fallback-текст «успешно запущен».
+     * Если рендер home.phtml снова сломается — этот тест упадёт первым.
+     */
+    public function testHomeRendersEngineStartGuideNotBareFallback(): void
+    {
+        $server = $this->stand([
+            'APP_KEY'           => 'integration-test-key-not-for-production',
+            'DB_DRIVER'         => 'sqlite',
+            'DB_SQLITE_ENABLED' => 'true',
+            'DB_DATABASE_PATH'  => 'engine.sqlite',
+        ]);
+
+        $home = $server->get('/', 'guide.test');
+        $this->assertSame(200, $home['status']);
+        $this->assertTrue(
+            str_contains($home['body'], 'успешно запущен') === false,
+            'Главная не должна быть голым fallback-текстом — должен рендериться engineStart.'
+        );
+        $this->assertTrue(
+            str_contains($home['body'], 'engineStart') || str_contains($home['body'], 'движк'),
+            'На главной присутствует контент стартового сайта/гайда.'
+        );
+    }
+
     /** Поднимает изолированный стенд и регистрирует его для остановки. */
     private function stand(array $env): HttpServer
     {
