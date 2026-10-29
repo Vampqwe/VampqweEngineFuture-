@@ -97,6 +97,27 @@ final class KernelDispatcher
 
         // Рендер через модуль Template (view/app/<theme>/home.phtml).
         $views = $this->bridge->templates();
+        if ($views !== null && !$views->exists('home', $this->bridge->scopeApp())) {
+            // Шаблон главной физически отсутствует (например, репозиторий
+            // склонирован без каталога view/ или он стёрт вручную). Честная
+            // диагностика вместо голого fallback-текста: пользователь должен
+            // увидеть ПРИЧИНУ и путь к восстановлению, а не «белую страницу
+            // с галочкой» (п.9 Конституции — самодиагностика, а не имитация).
+            $hint = htmlspecialchars(
+                'Каталог шаблонов view/app/engineStart/home.phtml не найден.'
+                . ' Проверьте наличие папки view/ в корне движка: при клонировании'
+                . ' из архива/репозитория убедитесь, что каталог view скопирован полностью,'
+                . ' либо переустановите стартовый сайт engineStart.',
+                ENT_QUOTES
+            );
+            return new Response(
+                "<div style=\"font-family:system-ui,sans-serif;max-width:640px;margin:12vh auto;padding:24px;"
+                . "border:1px solid #d0d7de;border-radius:8px;background:#ffffff;color:#1f2328\">"
+                . "<h2 style=\"margin:0 0 12px\">⚠️ Стартовый сайт не найден</h2>"
+                . "<p style=\"margin:0;line-height:1.6\">{$hint}</p></div>",
+                500
+            );
+        }
         if ($views !== null) {
             // Статика темы — через реестр Assets (каскад site->theme->core):
             // регистрируем 'site.css'/'site.js' и публикуем теги в шаблоны.
