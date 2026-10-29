@@ -26,6 +26,13 @@ class Kernel
 {
     private readonly ModuleBridge $bridge;
 
+    /**
+     * Флаг однократного фонового применения миграций схемы БД на процесс.
+     * Инициализируется false — без него Strict Types + неинициализированное
+     * свойство давали fatal "Undefined property" на первом же запросе (PR #72).
+     */
+    private bool $migrationsApplied = false;
+
     public function __construct(
         private readonly ContainerInterface $container
     ) {
