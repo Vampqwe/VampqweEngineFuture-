@@ -100,10 +100,17 @@ final class SiteIdentityHttpTest extends TestCase
         );
     }
 
-    /** Поднимает изолированный стенд и регистрирует его для остановки. */
+    /**
+     * Поднимает изолированный стенд и регистрирует его для остановки.
+     *
+     * migrate: true — разворачивает sqlite-схему из database/*.sql тем же
+     * единственным путём (модуль Migration), что и установщик. Без этого
+     * «установленный» стенд был бы с пустой БД: миграция в ядре больше не
+     * применяется в фоне при запросах, только инсталлятором.
+     */
     private function stand(array $env): HttpServer
     {
-        $server = HttpServer::boot(self::ROOT, $env);
+        $server = HttpServer::boot(self::ROOT, $env, installed: true, migrate: true);
         $this->servers[] = $server;
 
         return $server;
