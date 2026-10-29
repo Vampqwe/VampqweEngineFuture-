@@ -119,7 +119,12 @@ final class Installer implements InstallerInterface, InstallerPageInterface
                 SuperAdmin::PASSWORD_HASH_ENV => $adminHash,
             ]);
 
-            // Флаг готовности — AppState::Running определяется по нему
+            // Флаг готовности — AppState::Running определяется по нему.
+            // Ставится СРАЗУ после записи .env, до Database/Schema-шагов: это
+            // часть защиты от рекурсивной блокировки Installing (Kernel):
+            // повторный вход в конвейер при живом .installing видит уже не
+            // NotInstalled и корректно сообщает «уже установлен», а не 503.
+            // При провале схемы ниже флаг снимается (состояние остаётся честным).
             $this->fs->createFile($this->flagPath(AppState::Running));
 
             // Database-шаг: создаём БД (если активный драйвер включён и доступен)

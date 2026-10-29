@@ -68,15 +68,24 @@ enum AppState: string
         // берутся из словаря, литералов в детекте нет (п.7/п.10).
         $flags = self::flagNames();
         unset($flags[self::NotInstalled->name]); // это «нет маркеров», проверяется последним
+
+        // ИСКЛЮЧЕНИЕ из приоритета (инвариант I1, KernelInstallGuardTest):
+        // живой '.installed' важнее любого переходного флага. install() держит
+        // .installing всё время выполнения; если бы приоритет был слепым,
+        // повторный вход конвейера видел бы Installing вместо Running и
+        // блокировал собственный запрос установщика (регрессия 503). Переходные
+        // флаги без .installed — честная установка/обслуживание (детект ниже).
+        if (is_file(self::NotInstalled->marker($storagePath))) {
+            return self::Running;
+        }
+
         foreach ($flags as $name => $markerFile) {
             if (is_file($storagePath . '/' . $markerFile)) {
                 return self::fromName($name);
             }
         }
 
-        return is_file(self::NotInstalled->marker($storagePath))
-            ? self::Running   // '.installed' есть, прочих нет — живой движок
-            : self::NotInstalled;
+        return self::NotInstalled;
     }
 
     /** Кейс по имени объявления (name, не backing value). */
