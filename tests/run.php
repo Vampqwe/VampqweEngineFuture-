@@ -8,14 +8,22 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/vendor/autoload.php';
 require_once __DIR__ . '/Framework/TestCase.php';
+// Хелперы интеграционного контура (php -S стенд) — без пересборки autoload:
+require_once __DIR__ . '/Framework/HttpServer.php';
 
-$files = glob(__DIR__ . '/Unit/*Test.php');
+$files = array_merge(
+    glob(__DIR__ . '/Unit/*Test.php') ?: [],
+    glob(__DIR__ . '/Integration/*Test.php') ?: [],
+);
 sort($files);
 
 $failures = 0;
 foreach ($files as $file) {
     require_once $file;
-    $class = 'Tests\\Unit\\' . basename($file, '.php');
+    // Namespace выводится из пути: Unit/XTest.php -> Tests\Unit\XTest,
+    // Integration/XTest.php -> Tests\Integration\XTest.
+    $sub   = str_contains($file, '/Integration/') ? 'Integration' : 'Unit';
+    $class = 'Tests\\' . $sub . '\\' . basename($file, '.php');
     if (!class_exists($class)) {
         fwrite(STDERR, "Класс {$class} не найден в {$file}\n");
         $failures++;

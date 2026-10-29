@@ -85,7 +85,7 @@
 ├── logs/            ← логи по каналам: logs/<дата>/<Модуль>.log
 ├── database/        ← SQL-дампы схемы (db.sql)
 ├── migrations/      ← версии схемы БД (<ГГГГ_ММ_ДД_HHMMSS>_имя.php)
-├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T4, SecretLeakCheck)
+├── tests/           ← собственный фреймворк + Unit (Container, Router, Security, Hook, Paths, Cache, Queue, Migration, Theme, Assets, ArrayHelper, KernelBoundary T1–T4, SecretLeakCheck) + Integration (SiteIdentityHttp — php -S стенд, матрица strict/мягкий/legacy)
 ├── docs/            ← CONSTITUTION.md — реестр «правило → чем проверяется» (Теорема синхронизации)
 ├── .github/workflows/ci.yml ← merge-gate: lint-rules ∧ test ∧ doctor (sqlite-стенд из .env.example)
 ├── bin/             ← CLI: php bin/engine doctor | migrate | sites | site:add | test | lint-rules
@@ -138,9 +138,21 @@ Windows: `start-dev.ps1` (уже передаёт router-скрипт) или `i
 
 ⚠️ Если в `.env` `SUPER_ADMIN_HASH` пуст (установка не завершена или флаг сброшен), вход невозможен — достаточно пройти `/install` заново: существующий `APP_KEY` не перетирается, хеш будет записан.
 
-## 🌐 Мультисайт (тема по домену)
+## 🌐 Мультисайт (тема по домену) и идентичность сайта
 
-Один движок обслуживает несколько сайтов: домен запроса резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/_starter` (движок не падает).
+**Идентичность экземпляра** — концепция «один запуск = один сайт» задаётся в `.env`:
+`BASE_URL_SITE=https://vampqwe.ru` (канонический URL; домен извлекается автоматически,
+явный `SITE_DOMAIN` перебивает — для reverse-proxy), `SITE_STRICT_HOST=true` — чужой
+Host получает 404 вместо обслуживания; при пустом `BASE_URL_SITE` включается легаси-резолв
+по заголовку Host (обратная совместимость). Новый домен само-регистрируется в реестре
+(`Theme::ensureSite`, идемпотентно — не перетирает тему/заголовок, выбранные админом).
+Второй сайт = второй экземпляр движка со своим `.env`.
+
+Домен резолвится в тему через реестр `engine_sites` (модуль Theme, `SiteRegistry`), затем — эвристика поддомена (`<theme>.localhost`), затем дефолт из `config/template.php`. Ядро при резолве вызывает хук `theme.resolved` (п.4) и авто-клонирует отсутствующую папку темы из стартера `view/app/_starter` (движок не падает).
+
+Матрица строгости (strict / мягкий / legacy) автоматизирована интеграционным HTTP-контуром:
+`tests/Integration/SiteIdentityHttpTest.php` поднимает встроенный сервер PHP из тест-раннера
+(`Tests\Framework\HttpServer`) на изолированном стенде с реальными Host-заголовками.
 
 ```bash
 php bin/engine migrate                      # создаёт таблицу engine_sites
