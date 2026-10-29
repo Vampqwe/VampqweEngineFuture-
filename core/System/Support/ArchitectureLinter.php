@@ -83,7 +83,7 @@ use App\Core\System\Enums\AppState;
 final class ArchitectureLinter
 {
     /** @var list<string> директории-цели относительно корня проекта */
-    private const TARGETS = ['core', 'app', 'tests', 'config', 'migrations'];
+    private const TARGETS = ['core', 'app', 'tests', 'config'];
 
     /**
      * Белый список R6: абстракции, на которые ядро (core/System) вправе
@@ -111,7 +111,7 @@ final class ArchitectureLinter
         'App\\Core\\Module\\Doctor\\Contracts\\DoctorInterface',
         'App\\Core\\Module\\Cache\\Contracts\\CacheInterface',
         'App\\Core\\Module\\Queue\\Contracts\\QueueInterface',
-        'App\\Core\\Module\\Migration\\Contracts\\MigratorInterface',
+        'App\\Core\\Module\\Migration\\Contracts\\MigrationInterface',
         'App\\Core\\Module\\Security\\Contracts\\SecurityInterface',
         'App\\Core\\Module\\Exception\\Contracts\\ExceptionHandlerInterface',
         // Контракты пользовательских модулей (app\/modules\/*\/Contracts) —

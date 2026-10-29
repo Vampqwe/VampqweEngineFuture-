@@ -27,10 +27,19 @@ use RuntimeException;
  */
 final class SqlFileRunner
 {
+    /** @var list<string> имена индексов, уже созданные в текущем прогоне (защита от дублей дампа) */
+    private array $createdIndexes = [];
+
     /** @return list<string> выполненные операторы (для логов/отчётов) */
     public function run(PDO $pdo, string $sql, string $driver = 'mysql', array $existingTables = []): array
     {
         $executed = [];
+        // Объект создаётся заново на каждый migrate() — состояние безопасно.
+        $this->createdIndexes = [];
+        // Индексы собираем и исполняем ПОСЛЕ всех таблиц: дамп может содержать
+        // CREATE INDEX до/без своей ALTER-секции, а «свежие» таблицы ещё могут
+        // не существовать на момент обхода (частичная схема + skipExisting).
+        $pendingIndexes = [];
 
         foreach ($this->statements($sql) as $statement) {
             // Идемпотентная досоздка: CREATE TABLE уже существующей таблицы
@@ -60,13 +69,18 @@ final class SqlFileRunner
                 continue; // SET/START TRANSACTION/COMMIT/USE — не для этой СУБД
             }
 
+            if (preg_match('/^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b/i', $statement)) {
+                $pendingIndexes[] = $statement;
+                continue;
+            }
+
             if (preg_match('/^\s*ALTER\s+TABLE\b/i', $statement)) {
                 // Дампы phpMyAdmin выносят ключи в постфиксные ALTER ... ADD KEY.
                 // На sqlite их надо преобразовать в CREATE INDEX и прогнать ПОСЛЕ
                 // создания таблиц; PRIMARY KEY/AUTO_INCREMENT игнорируем (в дампе
                 // id без inline-PK -> INTEGER PRIMARY KEY AUTOINCREMENT по our-port).
                 foreach ($this->splitAlterKeys($statement) as $indexStatement) {
-                    $this->execute($pdo, $indexStatement, $executed);
+                    $pendingIndexes[] = $indexStatement;
                 }
                 continue;
             }
@@ -74,16 +88,25 @@ final class SqlFileRunner
             $this->execute($pdo, $this->portToSqlite($statement), $executed);
         }
 
+        foreach ($pendingIndexes as $indexStatement) {
+            $this->executeIndex($pdo, $indexStatement, $executed);
+        }
+
         return $executed;
     }
 
     /**
      * Идемпотентная досоздка: определяет, создаёт ли данный оператор таблицу,
-     * которая уже присутствует в СУБД (список $existingTables из information_schema
+     * которая уже присутствует в СУБД ($existingTables из information_schema
      * / sqlite_master). Используется при повторном прогоне дампа схемы (re-install),
      * чтобы не падать на DDL-конфликте "table already exists".
      *
-     * @param list<string> $existingTables имена существующих таблиц (в нижнем регистре)
+     * Формат $existingTables — хеш-карта lowercase => true (как отдаёт
+     * DatabaseManager::existingTables()): сверка по array_key_exists, а не
+     * in_array по значениям (значения — bool, сравнение давало вечный false
+     * и повторный прогон падал на первом же DDL).
+     *
+     * @param array<string,true> $existingTables
      */
     private function createsExistingTable(string $statement, array $existingTables): bool
     {
@@ -91,7 +114,7 @@ final class SqlFileRunner
             return false; // CREATE TABLE ... AS SELECT / прочее — не наш случай
         }
 
-        return in_array(strtolower($m[1]), $existingTables, true);
+        return array_key_exists(strtolower($m[1]), $existingTables);
     }
 
     private function execute(PDO $pdo, string $statement, array &$executed): void
@@ -108,6 +131,54 @@ final class SqlFileRunner
             );
         }
         $executed[] = $statement;
+    }
+
+    /**
+     * Идемпотентное исполнение CREATE INDEX на не-mysql диалектах.
+     *
+     * Почему это нужно: sqlite/mysql расходятся в именовании индексов —
+     * дамп содержит «голые» имена (uk_email для каждой таблицы), а наш
+     * перенос ALTER ... ADD KEY добавляет префикс таблицы (users_uk_email).
+     * При частичной схеме (например, таблица уже создана более ранним
+     * прогоном) один и тот же индекс может прилететь дважды: прямой
+     * CREATE INDEX uk_email и префиксованный users_uk_email из ALTER —
+     * второй прогон падал с «index users_uk_email already exists».
+     *
+     * Правила: IF NOT EXISTS всегда; повторный прогон дампа (re-install)
+     * не должен падать на DDL-конфликте. Дубликаты имени в текущем
+     * прогоне отсекаются до обращения к СУБД.
+     */
+    private function executeIndex(PDO $pdo, string $statement, array &$executed): void
+    {
+        if (!preg_match('/^(\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+)(?:IF\s+NOT\s+EXISTS\s+)?[`"\[]?([A-Za-z0-9_]+)[`"\]]?\s+ON\b(.*)$/is', $statement, $m)) {
+            // Нестандартная форма — исполняем как есть (честный fail при ошибке).
+            $this->execute($pdo, $statement, $executed);
+
+            return;
+        }
+
+        $name = strtolower($m[2]);
+
+        if (in_array($name, $this->createdIndexes, true)) {
+            return; // дубль внутри одного прогона дампа — молча пропускаем
+        }
+
+        $normalized = $m[1] . 'IF NOT EXISTS ' . $m[2] . ' ON' . $m[3];
+
+        try {
+            $pdo->exec($normalized);
+        } catch (\PDOException $e) {
+            throw new RuntimeException(
+                'Модуль [Database]: ошибка выполнения оператора из SQL-дампа: '
+                . $e->getMessage() . PHP_EOL
+                . 'Оператор: ' . mb_substr($normalized, 0, 200),
+                (int) $e->getCode(),
+                $e
+            );
+        }
+
+        $this->createdIndexes[] = $name;
+        $executed[]             = $normalized;
     }
 
     /**

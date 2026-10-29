@@ -26,10 +26,10 @@ use App\Core\Module\Exception\Contracts\ExceptionHandlerInterface;
 
 $command = $argv[1] ?? 'doctor';
 
-$allowed = ['doctor', 'migrate', 'migration:rollback', 'migration:make', 'cache:clear', 'template:clear', 'queue:work', 'queue:status', 'sites', 'site:add', 'test', 'lint-rules'];
+$allowed = ['doctor', 'migration:status', 'migration:run', 'cache:clear', 'template:clear', 'queue:work', 'queue:status', 'sites', 'site:add', 'test', 'lint-rules'];
 if (!in_array($command, $allowed, true)) {
     echo "Неизвестная команда: {$command}\n"
-        . "Доступные: doctor | migrate [id] | migration:rollback [id] | migration:make <имя>"
+        . "Доступные: doctor | migration:status | migration:run"
         . " | cache:clear | template:clear | queue:work [--once|--max=N|--seconds=N] | queue:status"
         . " | sites | site:add <домен> <тема> [заголовок] | test | lint-rules\n";
     exit(1);
@@ -142,38 +142,31 @@ try {
         exit(0);
     }
 
-    // --- Команды модуля Migration (версионирование схемы БД) ---
+    // --- Команды модуля Migration: ЕДИНСТВЕННЫЙ путь миграции схемы — установщик.
+    // В CLI оставлен только read-only статус (plan) и явный аварийный прогон
+    // дампов database/*.sql для уже созданной, но пустой БД (страховка админа).
+    // PHP-миграций (migrations/*.php), rollback и make в движке больше нет.
     if (!in_array($command, ['doctor', 'cache:clear', 'queue:work', 'queue:status'], true)) {
-        /** @var \App\Core\Module\Migration\Contracts\MigratorInterface $migrator */
-        $migrator = $c->get(\App\Core\Module\Migration\Contracts\MigratorInterface::class);
-        $arg = $argv[2] ?? null;
+        /** @var \App\Core\Module\Migration\Contracts\MigrationInterface $migrator */
+        $migrator = $c->get(\App\Core\Module\Migration\Contracts\MigrationInterface::class);
 
         switch ($command) {
-            case 'migrate':
-                $done = $migrator->migrate($arg);
-                if ($done === []) {
-                    echo "✅ Миграций для применения нет. Статус: "
-                        . json_encode($migrator->status(), JSON_UNESCAPED_UNICODE) . "\n";
-                } else {
-                    foreach ($done as $id) {
-                        echo "✅ Применена миграция: {$id}\n";
-                    }
-                }
-                exit(0);
-
-            case 'migration:rollback':
-                $rolled = $migrator->rollback($arg);
-                echo $rolled === null
-                    ? "➖ Откатывать нечего (реестр пуст).\n"
-                    : "↩️  Откачена миграция: {$rolled}\n";
-                exit(0);
-
-            case 'migration:make':
-                if (!is_string($arg) || $arg === '') {
-                    echo "Использование: php bin/engine migration:make <имя_миграции>\n";
+            case 'migration:status':
+                if (!$migrator->hasSchemaSource()) {
+                    echo "⚠️  В каталоге database/ не найдено SQL-дампов с CREATE TABLE"
+                        . " — источник схемы отсутствует, необходимо создать базу данных.\n";
                     exit(1);
                 }
-                echo "📝 Создана заготовка: " . $migrator->make($arg) . "\n";
+                $plan = $migrator->plan();
+                echo "📋 Источник схемы: " . implode(', ', $plan['files']) . "\n";
+                echo "   Таблиц в дампах: " . count($plan['tables'])
+                    . ', не развёрнуто: ' . ($plan['missing'] === [] ? '0 ✅' : implode(', ', $plan['missing'])) . "\n";
+                exit($plan['missing'] === [] ? 0 : 1);
+
+            case 'migration:run':
+                $report = $migrator->run();
+                echo "✅ Схема применена из дампов (" . implode(', ', $report['files']) . "):"
+                    . " {$report['statements']} операторов\n";
                 exit(0);
         }
     }
@@ -184,7 +177,7 @@ try {
         $themes = $c->get(\App\Core\Module\Theme\Contracts\ThemeInterface::class);
         $sites  = $themes->sites();
         if ($sites === []) {
-            echo "🌐 Реестр сайтов пуст (БД недоступна или таблица engine_sites не создана — выполните 'php bin/engine migrate').\n";
+            echo "🌐 Реестр сайтов пуст (БД недоступна или таблица engine_sites не создана — выполните 'php bin/engine migration:run').\n";
             exit(0);
         }
         echo "🌐 Сайты мультисайта (домен -> тема view/app/):\n";
@@ -207,7 +200,7 @@ try {
             exit(1);
         }
         if (!$themes->registerSite($domain, $theme, $title)) {
-            echo "❌ Не удалось зарегистрировать сайт (БД недоступна или не установлена — 'php bin/engine migrate').\n";
+            echo "❌ Не удалось зарегистрировать сайт (БД недоступна или не установлена — 'php bin/engine migration:run').\n";
             exit(1);
         }
         echo "✅ Сайт '{$domain}' привязан к теме '{$theme}'.\n";
