@@ -186,6 +186,31 @@ final class ModuleBridge
         return $config === null ? $default : $config->get($key, $default);
     }
 
+    // ---------- идентичность сайта (BASE_URL_SITE / SITE_DOMAIN) ----------
+
+    /**
+     * Домен ЭТОГО экземпляра движка: явный SITE_DOMAIN, иначе хост из
+     * BASE_URL_SITE; '' = идентичность не настроена (легаси-режим резолва
+     * по Host + реестру engine_sites). Чистые преобразования — в SiteIdentity.
+     */
+    public function siteDomain(): string
+    {
+        $explicit = strtolower(trim((string) $this->configValue('app.site_domain', '')));
+        if ($explicit !== '') {
+            return $explicit;
+        }
+
+        return SiteIdentity::domainFromUrl(
+            (string) $this->configValue('app.site_url', '')
+        );
+    }
+
+    /** Жёсткий режим: запросы с чужого Host получают 404 (см. .env.example). */
+    public function siteStrictHost(): bool
+    {
+        return (bool) $this->configValue('app.site_strict_host', false);
+    }
+
     /** @template T @param class-string<T> $id @return T|null */
     private function opt(string $id): ?object
     {
