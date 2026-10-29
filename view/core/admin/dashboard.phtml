@@ -3,6 +3,56 @@
 @section('content')
 <h1>📊 Дашборд</h1>
 
+@php($info = $info ?? null)
+@if($info !== null)
+  {-- Dashboard v2: снимок состояния движка от EngineInfoService (п.9: любой блок может отсутствовать) --}
+  <div class="cards" style="margin-bottom:18px">
+    <div class="card"><b>{{ $info['engine']['version'] }}</b><span>Версия движка · {{ $info['engine']['mode'] }}</span></div>
+    <div class="card"><b><span class="ok">{{ $info['state']['label'] }}</span></b><span>Состояние</span></div>
+    <div class="card"><b>{{ $info['php']['version'] }}</b><span>PHP · {{ $info['php']['memory_limit'] }} · opcache: {{ $info['php']['opcache'] }}</span></div>
+    <div class="card"><b>{{ $info['database']['connected'] ? 'ON' : 'OFF' }}</b><span>БД · {{ $info['database']['driver'] }}{{ $info['database']['server'] !== '' ? ' (' . $info['database']['server'] . ')' : '' }}</span></div>
+    <div class="card"><b>{{ $info['cache']['files'] }}</b><span>Файлов кэша шаблонов · {{ $info['cache']['size'] }}</span></div>
+    @if($info['database']['migration'] !== null)
+      <div class="card"><b>{{ $info['database']['migration']['applied'] }}</b><span>Миграций применено@if($info['database']['migration']['pending'] > 0) · <span style="color:#d29922">ждут: {{ $info['database']['migration']['pending'] }}</span>@endif</span></div>
+    @endif
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <b>🗄️ Таблицы движка</b>
+    @if($info['database']['tables'] !== [])
+      <table>
+        <tr><th>Таблица</th><th>Строк</th></tr>
+        @foreach($info['database']['tables'] as $tbl)
+          <tr><td><code>{{ $tbl['table'] }}</code> — {{ $tbl['label'] }}</td><td>{{ $tbl['rows'] }}</td></tr>
+        @endforeach
+      </table>
+    @else
+      <p style="font-size:13px;color:#9aa3b5">Таблиц пока нет — база пуста или модуль БД недоступен.</p>
+    @endif
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <b>🧩 Рабочие модули</b>
+    <p style="font-size:13px;color:#9aa3b5;margin:6px 0">
+      @foreach($info['modules'] as $mod)
+        <span class="{{ $mod['ok'] ? 'ok' : 'fail' }}" style="margin-right:8px">{{ $mod['name'] }}{{ $mod['critical'] ? '*' : '' }}</span>
+      @endforeach
+    </p>
+    <p style="font-size:12px;color:#7d8590"><code>*</code> — критичный для запуска.</p>
+  </div>
+
+  @if($info['logs']['lines'] !== [])
+    <div class="card" style="margin-bottom:18px">
+      <b>📋 Последние ошибки ({{ $info['logs']['file'] }})</b>
+      <ul style="font-size:12px;color:#f85149">
+        @foreach($info['logs']['lines'] as $logLine)
+          <li>{{ $logLine }}</li>
+        @endforeach
+      </ul>
+    </div>
+  @endif
+@endif
+
 @php($site = $site ?? ['domain' => '', 'theme' => '', 'sites' => []])
 <div class="card" style="margin-bottom:18px">
   <b>🌐 Сайт этого экземпляра</b>
