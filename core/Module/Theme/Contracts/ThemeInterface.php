@@ -55,6 +55,13 @@ interface ThemeInterface
      */
     public function registerSite(string $domain, string $theme, string $title): bool;
 
+    /**
+     * Гарантировать наличие сайта-идентичности в реестре («один запуск = один
+     * сайт»): если домен уже зарегистрирован — НЕ перетирает тему/заголовок,
+     * иначе создаёт запись. Возвращает false только при недоступной БД.
+     */
+    public function ensureSite(string $domain, string $theme, string $title): bool;
+
     /** Немедленно переключить шаблонизатор на тему (без проверки домена). */
     public function use(string $theme): void;
 

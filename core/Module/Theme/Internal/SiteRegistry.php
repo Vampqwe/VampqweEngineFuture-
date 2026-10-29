@@ -30,6 +30,20 @@ final class SiteRegistry
     }
 
     /**
+     * Есть ли в реестре точная запись для домена? (без кэша запроса и
+     * эвристик — честный вопрос «зарегистрирован ли сайт».)
+     */
+    public function hasDomain(string $domain): bool
+    {
+        $domain = strtolower(trim($domain));
+        if ($domain === '') {
+            return false;
+        }
+
+        return isset($this->load()[$domain]);
+    }
+
+    /**
      * Домен -> тема из БД ('' если нет записи / БД недоступна).
      */
     public function themeFor(string $host): string

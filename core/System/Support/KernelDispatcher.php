@@ -57,6 +57,19 @@ final class KernelDispatcher
             $host = $configured !== ''
                 ? $configured
                 : SiteIdentity::normalizeHost((string) ($request->header('host') ?? ''));
+
+            // Само-регистрация идентичности (концепция «один запуск = один
+            // сайт»): если экземпляр объявил домен в BASE_URL_SITE/SITE_DOMAIN,
+            // но его ещё нет в реестре engine_sites — добавляем запись с темой
+            // по умолчанию. Идемпотентно и best effort: при недоступной БД
+            // ensureSite() вернёт false и резолв деградирует как раньше (п.9).
+            // Без этого шага конфигурационный домен не имел бы записи в реестре,
+            // resolve() отдавал бы первую запись ('localhost'), а авто-клон
+            // темы никогда бы не запускался — новый сайт выглядел бы сломанным.
+            if ($configured !== '') {
+                $themes->ensureSite($configured, $this->bridge->defaultTheme(), $appName);
+            }
+
             $theme = $themes->resolveForRequest($host);
             $site  = $themes->site();
 
