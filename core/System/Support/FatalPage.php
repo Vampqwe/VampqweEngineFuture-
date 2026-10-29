@@ -46,43 +46,56 @@ final class FatalPage
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>500 — Фатальная ошибка запуска</title>
             <style>
-              :root { color-scheme: dark; }
+              /* Единая системная тема движка (GitHub dark). Токены ПОВТОРЯЮТ
+                 view/core/assets/css/engine.css — менять вместе (см. шапку того
+                 файла). Inline намеренно: FatalPage рендерится до инициализации
+                 ядра, когда модуль Assets и /assets/* могут быть недоступны. */
+              :root {
+                color-scheme: dark;
+                --bg: #0d1117; --panel: #161b22; --elevated: #1c2128; --inset: #010409;
+                --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+                --link: #4493f8; --red: #f85149; --purple: #bc8cff; --amber: #d29922;
+              }
               * { box-sizing: border-box; margin: 0; padding: 0; }
               body {
                 font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-                background: #12141a; color: #e6e9f0; min-height: 100vh;
+                background: var(--bg); color: var(--text); min-height: 100vh;
                 display: flex; align-items: center; justify-content: center; padding: 24px;
               }
               .card {
-                max-width: 900px; width: 100%; background: #1b1e27;
-                border: 1px solid #2c3040; border-radius: 14px; padding: 28px 32px;
-                box-shadow: 0 12px 40px rgba(0,0,0,.45);
+                max-width: 900px; width: 100%; background: var(--panel);
+                border: 1px solid var(--border); border-radius: 14px; padding: 28px 32px;
+                box-shadow: 0 12px 40px rgba(1, 4, 9, 0.5);
               }
-              h1 { font-size: 20px; margin-bottom: 6px; color: #ff6b6b; }
-              .sub { font-size: 13px; color: #9aa3b5; margin-bottom: 18px; }
+              h1 { font-size: 20px; margin-bottom: 6px; color: var(--red); }
+              .sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
               .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
               .badge {
                 font-size: 12px; padding: 4px 10px; border-radius: 999px;
-                background: #232838; border: 1px solid #333a52; color: #c3cadb;
+                background: var(--elevated); border: 1px solid var(--border); color: var(--text);
               }
               .err {
-                background: #241a1e; border: 1px solid #5c2a31; border-radius: 10px;
+                background: rgba(248, 81, 73, 0.08); border: 1px solid rgba(248, 81, 73, 0.4);
+                border-left: 3px solid var(--red); border-radius: 10px;
                 padding: 14px 16px; margin-bottom: 14px;
               }
-              .err b { color: #ff8f8f; word-break: break-word; }
-              .loc { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #d0b8ff; margin-top: 6px; }
+              .err b { color: #ffa198; word-break: break-word; }
+              .loc { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--purple); margin-top: 6px; }
               pre {
-                background: #10121a; border: 1px solid #262b3d; border-radius: 10px;
+                background: var(--inset); border: 1px solid var(--border); border-radius: 10px;
                 padding: 14px 16px; overflow-x: auto; font-size: 12px; line-height: 1.55;
                 color: #a9c7ff; white-space: pre-wrap; word-break: break-word;
               }
               details { margin-top: 14px; }
-              summary { cursor: pointer; font-size: 13px; color: #9aa3b5; margin-bottom: 10px; }
+              summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
               .hint {
-                margin-top: 16px; font-size: 13px; color: #ffd28a;
-                background: #24201a; border: 1px solid #5c4a2a; border-radius: 10px; padding: 12px 14px;
+                margin-top: 16px; font-size: 13px; color: #e3b341;
+                background: rgba(210, 153, 34, 0.08); border: 1px solid rgba(210, 153, 34, 0.4);
+                border-left: 3px solid var(--amber); border-radius: 10px; padding: 12px 14px;
               }
-              footer { margin-top: 18px; font-size: 11px; color: #5d6577; }
+              a { color: var(--link); text-decoration: none; }
+              a:hover { text-decoration: underline; }
+              footer { margin-top: 18px; font-size: 11px; color: #6e7681; }
             </style>
             </head>
             <body>
