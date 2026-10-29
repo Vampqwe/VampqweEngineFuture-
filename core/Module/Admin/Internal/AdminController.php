@@ -215,9 +215,21 @@ final class AdminController implements AdminPanelInterface
         throw new RuntimeException('Раздел дашборда не зарегистрирован.');
     }
 
-    /** Форма входа панели (GET /admin/login). */
+    /**
+     * Форма входа панели (GET /admin/login).
+     *
+     * ВАЖНО (защита от 419): токен генерится ДО рендера и ЯВНО передаётся в
+     * данные шаблона. Layout панели может брать $csrf из разделённых переменных
+     * (share), но сам шаблон login.phtml не должен полагаться на то, что
+     * csrfToken() вызовется второй раз «в нужном порядке» — это хрупко.
+     */
     private function loginForm(Request $request, string $error = ''): Response
     {
+        $session = $this->container->has(\App\Core\Module\Session\Contracts\SessionInterface::class)
+            ? $this->container->get(\App\Core\Module\Session\Contracts\SessionInterface::class)
+            : null;
+        $token = $session !== null ? $session->csrfToken() : '';
+
         $tpl = $this->container->has(\App\Core\Module\Template\Contracts\TemplateInterface::class)
             ? $this->container->get(\App\Core\Module\Template\Contracts\TemplateInterface::class)
             : null;
@@ -228,6 +240,7 @@ final class AdminController implements AdminPanelInterface
             'title' => 'Вход в панель',
             'error' => $error,
             'next'  => (string) ($request->get('next') ?? '/admin'),
+            'csrf'  => $token,
         ]) ?? $this->inlineLogin($error, (string) ($request->get('next') ?? '/admin'));
 
         return new Response($html);

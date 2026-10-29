@@ -59,7 +59,10 @@ final class AuthController implements AuthManagerInterface
         }
 
         // Защита от session fixation: новый id при повышении привилегий.
-        $this->session?->start();
+        // startPreservingCsrf(), а не голый start(): ротация id обязана
+        // переносить CSRF-токен в новую запись, иначе следующий POST
+        // (например, вход в панель /admin/login) получит 419 «token expired».
+        $this->session?->startPreservingCsrf();
         $this->session?->set(self::SESSION_KEY, (int) $user['id']);
 
         // Rehash «на лету», если PHP предложил более сильный алгоритм.
@@ -105,7 +108,9 @@ final class AuthController implements AuthManagerInterface
             ], 'register', 422);
         }
 
-        $this->session?->start();
+        // Защита от session fixation с переносом CSRF-токена (см. login()):
+        // голый start() терял токен -> 419 на следующем POST.
+        $this->session?->startPreservingCsrf();
         $this->session?->set(self::SESSION_KEY, $id);
 
         $this->dispatch('auth.registered', ['id' => $id, 'email' => strtolower($email)]);
