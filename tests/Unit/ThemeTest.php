@@ -93,6 +93,58 @@ final class ThemeTest extends TestCase
         $this->cleanup();
     }
 
+    /**
+     * Инвариант само-регистрации идентичности (концепция «один запуск = один сайт»,
+     * используется KernelDispatcher перед резолвом темы):
+     *  - ensureSite создаёт карточку для нового домена;
+     *  - повторный вызов НЕ перетирает тему/заголовок, выбранные админом
+     *    (идемпотентность: side-effect-free на уже зарегистрированном домене);
+     *  - пустой домен — честный false без записи в БД.
+     */
+    public function testEnsureSiteIsIdempotentAndNonDestructive(): void
+    {
+        $this->dir = sys_get_temp_dir() . '/engine_theme_ensure_' . bin2hex(random_bytes(4));
+        $appView   = $this->dir . '/view/app';
+        mkdir($appView . '/animals', 0775, true);
+        mkdir($appView . '/_default', 0775, true);
+        mkdir($this->dir . '/config', 0775, true);
+        file_put_contents($this->dir . '/config/database.php', "<?php\nreturn [\n  'driver' => 'sqlite',\n  'connections' => ['sqlite' => ['enabled' => true, 'driver' => 'sqlite', 'database' => ':memory:']],\n  'emulate_prep' => false,\n  'timeout' => 5,\n];\n");
+
+        $container = new Container();
+        $config    = new ConfigRepository(new PhpArrayParser(), $this->dir . '/config');
+        $container->instance(ConfigRepository::class, $config);
+        $container->instance('storage_path', $this->dir);
+
+        /** @var DatabaseInterface $db */
+        $db = new DatabaseManager($container, $config);
+        $db->run("CREATE TABLE engine_sites (id INTEGER PRIMARY KEY AUTOINCREMENT, domain VARCHAR(191) NOT NULL UNIQUE, theme VARCHAR(64) NOT NULL DEFAULT '_default', title VARCHAR(191) NOT NULL DEFAULT '', is_active SMALLINT NOT NULL DEFAULT 1, created_at VARCHAR(40) NOT NULL DEFAULT '')");
+
+        $views = new Template($this->dir . '/view/core', $appView, $this->dir . '/cache', false);
+        $theme = new Theme($views, new SiteRegistry($db), new FileSystem(), $appView, '_default');
+
+        // 1. Новый домен -> карточка создана.
+        $this->assertTrue($theme->ensureSite('new.test', 'animals', 'Новый'), 'ensureSite регистрирует новый домен.');
+        $this->assertSame(['domain' => 'new.test', 'theme' => 'animals', 'title' => 'Новый'], $theme->resolveSite('new.test'));
+
+        // 2. Админ сменил тему/заголовок через registerSite (перезапись разрешена).
+        $theme->registerSite('new.test', '_default', 'Админ переписал');
+
+        // 3. Повторный ensureSite (например, после рестарта процесса) НЕ должен
+        //    переть старую конфигурацию из аргументов — только сохранить факт.
+        $this->assertTrue($theme->ensureSite('new.test', 'animals', 'Старое название'));
+        $site = $theme->resolveSite('new.test');
+        $this->assertNotNull($site);
+        $this->assertSame('_default', $site['theme'], 'Тема админа сохранена.');
+        $this->assertSame('Админ переписал', $site['title'], 'Заголовок админа сохранён.');
+        $this->assertCount(1, $theme->sites(), 'Без дублей при повторной само-регистрации.');
+
+        // 4. Пустой домен -> false, ничего не пишется.
+        $this->assertFalse($theme->ensureSite('', 'animals', ''));
+        $this->assertCount(1, $theme->sites());
+
+        $this->cleanup();
+    }
+
     private function cleanup(): void
     {
         if ($this->dir !== null && is_dir($this->dir)) {

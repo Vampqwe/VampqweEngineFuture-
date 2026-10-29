@@ -23,7 +23,7 @@
 | п.1 | Ядро не знает бизнес-логику и конкретные классы модулей | R6 (ссылки core/System на классы модулей вне белого списка контрактов), R6b (единственный носитель знания о `::class` модулей — `Support/ModuleBridge.php`), R8 (аннотированные исключения) | `KernelBoundaryTest::testKernelSurvivesWithoutApplicationModules` (T1), `testOnlyModuleBridgeKnowsModuleClassNames` (T4a) |
 | п.2 | Граница модуля — только `Contracts/`, `Internal/` закрыт | R3 (трансграничные use Internal\), R9 (new/instanceof через границы), R10 (крипто ровно в одном месте), R11b (scalar-константы контрактов доступны без нарушения п.2) | `SecurityTest` (roundtrip единого Crypto), юнит-тесты модулей через контракты |
 | п.3 | DI, никаких глобалов и service locator | R2 (dirname-пути), R7 (BASE_PATH только в bootstrap путей), R11c (нет static-состояния в контрактах) | `ContainerTest` (autowiring, циклы, instance) |
-| п.4 | Две дороги HTTP + расширение только хуками | — (структура конвейера) | `RouterTest`, `HookTest`, `AssetsTest` (dispatch-точки) |
+| п.4 | Две дороги HTTP + расширение только хуками | — (структура конвейера) | `RouterTest`, `HookTest`, `AssetsTest` (dispatch-точки); идентичность сайта: `SiteIdentityTest` (юнит) + `tests/Integration/SiteIdentityHttpTest` (реальный HTTP: strict ⇒ чужой Host 404, мягкий/legacy ⇒ 200; стенд `Tests\Framework\HttpServer` поднимает php -S из раннера) |
 | п.5 | Расширяемость без правки ядра | R5 (манифест config/modules.php ссылается на существующие провайдеры) | boot-тесты (`Doctor` runtime-проверка ModulePresenceCheck) |
 | п.6 | Манифест — единственный источник истины о модулях | R4 (PSR-4 namespace↔путь), R5 | `Doctor` CLI check |
 | п.7 | Пути только из `Paths::MAP`; имена флагов только из `AppState` | R2, R7 (конкатенации вне MAP; словарь маркеров = `AppState::flagNames()`, дублирование имён флагов в линтере запрещено) | `PathsTest`, `KernelBoundaryTest::testAppStateDetectIsSingleResolver` (T2), `testNoFlagLiteralsInKernelCode` (T3) |
@@ -75,7 +75,7 @@ CI (`.github/workflows/ci.yml`) запускает обе части теоре�
 ```bash
 composer dump-autoload
 php bin/engine lint-rules   # статика: R1–R11
-php bin/engine test         # поведение: все Unit-тесты
+php bin/engine test         # поведение: Unit-тесты + Integration (реальный HTTP через php -S стенд)
 php bin/engine doctor       # smoke: честная самодиагностика живого дерева
 ```
 
