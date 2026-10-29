@@ -1,0 +1,22 @@
+@extends('layouts/installer')
+@section('title') Настройка движка @endsection
+@section('content')
+<h1>Настройка движка</h1>
+<div class="sub">Шаг 2 из 3. Настройки можно поменять позже в <code>.env</code>.</div>
+@if(!empty($errors))
+    <div class="errbox">{!! implode('<br>', array_map([\App\Core\Module\Installer\Internal\InstallerView::class, 'esc'], $errors)) !!}</div>
+@endif
+<form method="post" action="/install/run">
+    <label>Название сайта</label>
+    <input name="app_name" value="{{ $appName }}" maxlength="64" required>
+    <label>Пароль супер-администратора <small>(единственный управленец движка, логин зашит в ядро)</small></label>
+    <input type="password" name="super_admin_password" minlength="8" autocomplete="new-password" required>
+    <label>Часовой пояс</label>
+    <select name="timezone">@foreach($timezones as $tz)
+        <option value="{{ $tz }}"@if($tz === $selectedTz) selected @endif>{{ $tz }}</option>@endforeach
+    </select>
+    <label style="display:flex;gap:8px;align-items:center;margin-top:14px">
+        <input type="checkbox" name="debug" value="1" style="width:auto"> Режим отладки (показывать трейсы ошибок)</label>
+    <button>Установить</button>
+</form>
+@endsection

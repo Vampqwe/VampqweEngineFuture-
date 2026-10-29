@@ -1,0 +1,44 @@
+@extends('layouts/admin')
+@section('title') {{ $title }} @endsection
+@section('content')
+<h1>🩺 Система (Doctor)</h1>
+
+<div class="card" style="margin-bottom:18px;display:inline-block">
+  <b class="{{ !empty($healthy) ? 'ok' : 'fail' }}">{{ !empty($healthy) ? 'ЗДОРОВ' : 'ЕСТЬ ПРОБЛЕМЫ' }}</b>
+  <span>{{ $verdict ?? '' }}</span>
+</div>
+
+<table>
+  <tr><th>Проверка</th><th>Статус</th><th>Сообщение</th></tr>
+  @foreach(($checks ?? []) as $c)
+    <tr>
+      <td>{{ $c['name'] }}</td>
+      <td class="{{ !empty($c['ok']) ? 'ok' : 'fail' }}">{{ !empty($c['ok']) ? '✓ ok' : '✗ fail' }}</td>
+      <td style="font-size:12px;color:#9aa3b5">{{ $c['message'] }}</td>
+    </tr>
+  @endforeach
+</table>
+
+@php($site = $site ?? ['domain' => '', 'sites' => []])
+@if(($site['sites'] ?? []) !== [])
+<h2 style="font-size:15px;color:#c3cadb;margin:18px 0 8px">🌐 Реестр сайтов (один запуск = один сайт)</h2>
+<p style="font-size:13px;color:#9aa3b5;margin:0 0 8px">
+  Домен этого экземпляра (SITE_DOMAIN / BASE_URL_SITE):
+  @if(($site['domain'] ?? '') !== '')
+    <code>{{ $site['domain'] }}</code>
+  @else
+    <i>не настроен — легаси-режим резолва по Host</i>
+  @endif
+</p>
+<table>
+  <tr><th>Домен</th><th>Тема</th><th></th></tr>
+  @foreach($site['sites'] as $sitem)
+    <tr>
+      <td>{{ $sitem['domain'] }}</td>
+      <td>{{ $sitem['theme'] }}</td>
+      <td>@if(!empty($sitem['isCurrent']))<span class="ok">← этот экземпляр</span>@endif</td>
+    </tr>
+  @endforeach
+</table>
+@endif
+@endsection

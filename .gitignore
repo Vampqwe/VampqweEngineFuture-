@@ -1,0 +1,43 @@
+# Секреты и локальная конфигурация (никогда не в git — п.8 Конституции)
+.env
+
+# Хранилище рантайма: кэш, БД, логи, сессии, загрузки (п.9 — всё преходящее)
+storage/*
+!storage/backups/
+!storage/cache/
+!storage/database/
+!storage/logs/
+!storage/queue/
+!storage/sessions/
+!storage/uploads/
+!storage/.gitkeep
+storage/backups/*
+!storage/backups/.gitkeep
+storage/cache/*
+!storage/cache/.gitkeep
+storage/cache/templates/
+storage/database/*
+!storage/database/.gitkeep
+storage/logs/*
+!storage/logs/.gitkeep
+storage/queue/*
+!storage/queue/.gitkeep
+storage/sessions/*
+!storage/sessions/.gitkeep
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+# Служебное состояние движка (флаги режимов создаются рантаймом)
+storage/.session_store.file
+storage/.installed
+storage/.maintenance
+storage/.error
+
+# vendor от composer (свой автозагрузчик ядра остаётся в git)
+vendor/bin/
+vendor/composer/
+
+# Временные файлы
+tmp_*.php
+*.log
+.DS_Store

@@ -1,0 +1,48 @@
+name: constitution-theorem
+
+# Merge-gate Теоремы синхронизации (docs/CONSTITUTION.md):
+#   lint-rules exit 0  ∧  test exit 0  ⇒  код соответствует Конституции.
+# Любой красный чек блокирует merge в main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  theorem:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.3']
+    name: PHP ${{ matrix.php }} — статика + тесты + doctor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Autoload (vendor — только собственный PSR-4 генератор)
+        run: composer dump-autoload --no-interaction
+
+      - name: Статика Конституции (R1–R11)
+        run: php bin/engine lint-rules
+
+      - name: Поведение (Unit-тесты, включая KernelBoundaryTest T1–T3)
+        run: php bin/engine test
+
+      # Doctor честен (п.9): без .env он вердиктует «есть проблемы», и это правильно.
+      # В CI мы проверяем живой дерево на детерминированном стенде: sqlite-стенд
+      # собирается из .env.example точечными заменами (не коммитится, живёт только в раннере).
+      - name: Конфигурация CI-стенда (.env из .env.example + sqlite)
+        run: |
+          cp .env.example .env
+          sed -i 's/^DB_DRIVER=mysql/DB_DRIVER=sqlite/' .env
+          sed -i 's/^DB_SQLITE_ENABLED=false/DB_SQLITE_ENABLED=true/' .env
+          sed -i 's|^DB_DATABASE_PATH=$|DB_DATABASE_PATH=engine.sqlite|' .env
+
+      - name: Честная самодиагностика живого дерева
+        run: php bin/engine doctor
